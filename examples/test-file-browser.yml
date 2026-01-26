@@ -1,0 +1,41 @@
+steps:
+  - output: info
+    value: "=== Test 1: Browse for File ==="
+
+  - component: file_browser
+    prompt: "Pick file"
+    start_path: "."
+    search_root: "."
+    max_depth: 4
+    #filter: "*.yml"
+    mode: file
+
+  - output: info
+    value: "You selected: {{selected_file}}"
+
+  - output: info
+    value: "=== Test 2: Browse for Directory ==="
+
+  - component: file_browser
+    prompt: "Select a directory"
+    variable: selected_dir
+    start_path: "~"
+    mode: directory
+
+  - output: info
+    value: "You selected directory: {{selected_dir}}"
+
+  - output: info
+    value: "=== Test 3: Browse from Home Directory ==="
+
+  - component: file_browser
+    prompt: "Select any file from home"
+    variable: home_file
+    start_path: "~"
+    mode: file
+
+  - output: info
+    value: "You selected: {{home_file}}"
+
+  - output: info
+    value: "All tests completed!"

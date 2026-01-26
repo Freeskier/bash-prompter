@@ -1,0 +1,52 @@
+steps:
+  - component: object
+    prompt: "Konfiguracja konta"
+    fields:
+      - variable: confirm
+        display: "Can you confirm?"
+        input: toggle
+        active: "yes"
+        inactive: "no"
+        default: "true"
+      - input: list
+        prompt: "Tags"
+        separator: ","
+        default: "a,b,c"
+        variable: "tags"
+      - input: color
+        variable: primary_color
+        display: "Primary color"
+        default: "#FF5500"
+      - variable: enabled
+        display: "Włączone?"
+        input: bool
+        default: true
+      - variable: start_date
+        display: "Data startu"
+        input: date
+        format: "YYYY-MM-DD"
+      - variable: load
+        display: "Obciążenie"
+        input: slider
+        min: 0
+        max: 100
+        step: 5
+        default: 50
+      - input: select
+        variable: role
+        display: "Rola"
+        options:
+          - Dev
+          - Staging
+          - Prod
+      - variable: password
+        display: "Hasło"
+        input: password
+        placeholder: "minimum 8 znaków"
+        validate:
+          - pattern: "^.{8,}$"
+            error: "Hasło musi mieć minimum 8 znaków"
+    variable: "account"
+
+  - output: info
+    value: "OK: color={{account.primary_color}}, role={{account.role}}, enabled={{account.enabled}}, start={{account.start_date}}, load={{account.load}}"

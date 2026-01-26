@@ -1,0 +1,60 @@
+steps:
+  - component: snippet
+    text: |
+      Deploy config:
+      tutaj jest sobie: <slid>
+        IP: <ip>
+        host: <host>
+        port: <port>
+        url: <url>
+        email: <email>
+        env: <env>
+        owner: <owner>
+        date: <date>
+        color: <color>
+        list: <list>
+        toggle: <toggle>
+        checkbox: <flag>
+        OUT: <slid> <ip> <host> <port> <url> <email>
+        OUT: <env> <owner> <date> <color> <list> <toggle> <flag>
+    variable: output
+    fields:
+      - name: slid
+        type: slider
+      - name: ip
+        type: ip
+      - name: host
+        type: text
+        placeholder: "example.com"
+      - name: port
+        type: number
+        min: 1
+        max: 65535
+        default: 8080
+      - name: url
+        type: url
+      - name: email
+        type: email
+      - name: env
+        type: select
+        options:
+          - dev
+          - staging
+          - prod
+      - name: owner
+        type: text
+        placeholder: "Team A"
+      - name: date
+        type: date
+        format: "YYYY-MM-DD"
+      - name: color
+        type: color
+      - name: list
+        type: list
+        separator: ","
+      - name: toggle
+        type: toggle
+        active: "on"
+        inactive: "off"
+      - name: flag
+        type: checkbox

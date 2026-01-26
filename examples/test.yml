@@ -1,0 +1,50 @@
+steps:
+  - input: slider
+    prompt: "Rozmiar"
+    min: 1
+    max: 100
+    step: 1
+    default: 10
+    unit: "GB"
+    variable: size
+    validate:
+      - pattern: "^[3-9][0-9]$|^[1-9][0-9]{2,}$"
+        error: "Rozmiar musi być większy od 30"
+
+  - input: ip
+    prompt: "Podaj IP"
+    variable: test_ip
+
+  - input: url
+    prompt: "Podaj URL"
+    variable: test_url
+
+  - input: select
+    variable: test
+    options:
+      - option1
+      - option2
+      - option3
+    prompt: Select an option
+
+  - component: table
+    prompt: "Konfiguracja serwerów"
+    variable: servers
+    fields:
+      - variable: hostname
+        display: "Hostname"
+        input: text
+        placeholder: "np. web-01"
+      - variable: ip
+        display: "IP"
+        input: ip
+      - variable: port
+        display: "Port"
+        input: slider
+        min: 1
+        max: 65535
+        step: 1
+        default: 80
+        validate:
+          - pattern: "^[3-9][0-9].*|^[1-9][0-9]{2,}$"
+            error: "Port musi być większy od 30"

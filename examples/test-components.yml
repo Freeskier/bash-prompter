@@ -1,0 +1,62 @@
+steps:
+  - output: info
+    value: "=== Test 1: Single Select ==="
+
+  - component: select
+    prompt: "Wybierz swoją ulubioną opcję"
+    options:
+      - Option 1
+      - Option 2
+      - Option 3
+      - Option 4
+    variable: "choice"
+
+  - output: info
+    value: "Wybrałeś: {{choice}}"
+
+  - output: info
+    value: "=== Test 2: Multi Select ==="
+
+  - component: multiselect
+    prompt: "Wybierz technologie które znasz"
+    options:
+      - JavaScript
+      - Python
+      - Go
+      - Rust
+      - Java
+      - C++
+    variable: "technologies"
+
+  - output: info
+    value: "Wybrane: {{technologies}}"
+
+  - output: info
+    value: "=== Test 3: Checkbox (Radio Buttons) ==="
+
+  - component: radio_group
+    prompt: "Wybierz swoją odpowiedź"
+    options:
+      - Yes
+      - No
+      - Maybe
+    default: "Yes"
+    variable: "answer"
+
+  - output: info
+    value: "Odpowiedź: {{answer}}"
+
+  - component: radio_group
+    prompt: "Wybierz rozmiar"
+    options:
+      - Small
+      - Medium
+      - Large
+      - Extra Large
+    variable: "size"
+
+  - output: info
+    value: "Wybrany rozmiar: {{size}}"
+
+  - output: info
+    value: "✓ Wszystkie komponenty przetestowane!"

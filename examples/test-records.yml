@@ -1,0 +1,71 @@
+steps:
+  - output: info
+    value: "=== Test 1: Simple Table Component ==="
+
+  - component: records
+    prompt: "Configure servers"
+    variable: servers
+    fields:
+      - variable: hostname
+        display: "Hostname"
+        input: text
+        placeholder: "e.g., web-server-1"
+
+      - variable: ip
+        display: "IP Address"
+        input: ip
+
+      - variable: port
+        display: "Port"
+        input: text
+        default: "80"
+
+  - output: info
+    value: "Created {{servers.count}} server(s)"
+
+  - output: info
+    value: "=== Displaying servers ==="
+
+  - loop:
+      items: servers
+      variable: srv
+      steps:
+        - output: info
+          value: "Server {{loop_index}}: {{srv.hostname}} at {{srv.ip}}:{{srv.port}}"
+
+  - output: info
+    value: "=== Test 2: Table with Different Input Types ==="
+
+  - component: records
+    prompt: "Configure users"
+    variable: users
+    fields:
+      - variable: username
+        display: "Username"
+        input: text
+        placeholder: "Enter username"
+
+      - variable: email
+        display: "Email"
+        input: email
+
+      - variable: admin
+        display: "Admin?"
+        input: bool
+        default: false
+
+  - output: info
+    value: "Created {{users.count}} user(s)"
+
+  - loop:
+      items: users
+      variable: user
+      steps:
+        - output: info
+          value: "User: {{user.username}} <{{user.email}}> Admin: {{user.admin}}"
+
+  - output: info
+    value: "=== Test 3: Conditional Based on Table Data ==="
+
+  - output: info
+    value: "All tests completed!"

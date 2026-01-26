@@ -1,0 +1,368 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://setup-sonda.local/schema.json",
+  "title": "Setup-Sonda YAML",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["steps"],
+  "properties": {
+    "steps": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/step" }
+    }
+  },
+  "definitions": {
+    "step": {
+      "oneOf": [
+        { "$ref": "#/definitions/inputStep" },
+        { "$ref": "#/definitions/outputStep" },
+        { "$ref": "#/definitions/commandStep" },
+        { "$ref": "#/definitions/pipelineStep" },
+        { "$ref": "#/definitions/scriptStep" },
+        { "$ref": "#/definitions/componentStep" },
+        { "$ref": "#/definitions/conditionStep" },
+        { "$ref": "#/definitions/loopStep" }
+      ]
+    },
+    "inputStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "prompt", "variable"],
+      "properties": {
+        "input": {
+          "type": "string",
+          "enum": [
+            "text",
+            "select",
+            "email",
+            "password",
+            "url",
+            "ip",
+            "number",
+            "slider",
+            "date",
+            "color",
+            "list",
+            "toggle",
+            "bool"
+          ]
+        },
+        "prompt": { "type": "string" },
+        "variable": { "type": "string" },
+        "placeholder": { "type": "string" },
+        "validate": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pattern", "error"],
+            "properties": {
+              "pattern": { "type": "string" },
+              "error": { "type": "string" }
+            }
+          }
+        },
+        "default": {},
+        "options": {
+          "oneOf": [
+            { "type": "array", "items": { "type": "string" } },
+            { "type": "string" }
+          ]
+        },
+        "min": { "type": ["number", "string"] },
+        "max": { "type": ["number", "string"] },
+        "step": { "type": ["number", "string"] },
+        "unit": { "type": "string" },
+        "format": { "type": "string" },
+        "separator": { "type": "string" },
+        "active": { "type": "string" },
+        "inactive": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "input": { "const": "select" } } },
+          "then": { "required": ["options"] }
+        }
+      ]
+    },
+    "outputStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["output", "value"],
+      "properties": {
+        "output": { "type": "string", "enum": ["info"] },
+        "value": { "type": "string" }
+      }
+    },
+    "commandStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "command": { "type": "string" },
+        "variable": { "type": "string" },
+        "message": { "type": "string" },
+        "spinner": { "type": ["boolean", "string"] },
+        "show_output": { "type": ["boolean", "string"] },
+        "log_lines": { "type": ["integer", "string"] }
+      }
+    },
+    "pipelineStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pipeline", "commands"],
+      "properties": {
+        "pipeline": {},
+        "message": { "type": "string" },
+        "show_output": { "type": ["boolean", "string"] },
+        "log_lines": { "type": ["integer", "string"] },
+        "commands": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["run"],
+            "properties": {
+              "name": { "type": "string" },
+              "run": { "type": "string" },
+              "variable": { "type": "string" },
+              "show_output": { "type": ["boolean", "string"] },
+              "log_lines": { "type": ["integer", "string"] }
+            }
+          }
+        }
+      }
+    },
+    "scriptStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["script"],
+      "properties": {
+        "script": { "type": "string" },
+        "args": { "type": "string" },
+        "variable": { "type": "string" },
+        "workdir": { "type": "string" }
+      }
+    },
+    "componentStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component"],
+      "properties": {
+        "component": {
+          "type": "string",
+          "enum": [
+            "select",
+            "multiselect",
+            "radio_group",
+            "confirm",
+            "object",
+            "records",
+            "table",
+            "snippet",
+            "file_browser"
+          ]
+        },
+        "prompt": { "type": "string" },
+        "variable": { "type": "string" },
+        "options": {
+          "oneOf": [
+            { "type": "array", "items": { "type": "string" } },
+            { "type": "string" }
+          ]
+        },
+        "default": {},
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/field" }
+        },
+        "start_path": { "type": "string" },
+        "filter": { "type": "string" },
+        "mode": { "type": "string", "enum": ["file", "directory"] },
+        "search_root": { "type": "string" },
+        "max_depth": { "type": ["integer", "string"] },
+        "text": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "component": { "enum": ["select", "multiselect", "radio_group"] }
+            }
+          },
+          "then": { "required": ["prompt", "variable", "options"] }
+        },
+        {
+          "if": { "properties": { "component": { "const": "confirm" } } },
+          "then": { "required": ["prompt", "variable"] }
+        },
+        {
+          "if": {
+            "properties": { "component": { "enum": ["object", "records"] } }
+          },
+          "then": { "required": ["prompt", "variable", "fields"] }
+        },
+        {
+          "if": { "properties": { "component": { "const": "snippet" } } },
+          "then": { "required": ["text", "variable", "fields"] }
+        },
+        {
+          "if": { "properties": { "component": { "const": "file_browser" } } },
+          "then": { "required": ["prompt", "variable"] }
+        }
+      ]
+    },
+    "field": {
+      "oneOf": [
+        { "$ref": "#/definitions/standardField" },
+        { "$ref": "#/definitions/snippetField" }
+      ]
+    },
+    "standardField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variable", "input"],
+      "properties": {
+        "variable": { "type": "string" },
+        "input": {
+          "type": "string",
+          "enum": [
+            "text",
+            "select",
+            "email",
+            "password",
+            "url",
+            "ip",
+            "number",
+            "slider",
+            "date",
+            "color",
+            "list",
+            "toggle",
+            "bool"
+          ]
+        },
+        "display": { "type": "string" },
+        "placeholder": { "type": "string" },
+        "validate": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pattern", "error"],
+            "properties": {
+              "pattern": { "type": "string" },
+              "error": { "type": "string" }
+            }
+          }
+        },
+        "min_length": { "type": ["integer", "string"] },
+        "min": { "type": ["number", "string"] },
+        "max": { "type": ["number", "string"] },
+        "step": { "type": ["number", "string"] },
+        "default": {},
+        "format": { "type": "string" },
+        "options": {
+          "oneOf": [
+            { "type": "array", "items": { "type": "string" } },
+            { "type": "string" }
+          ]
+        },
+        "active": { "type": "string" },
+        "inactive": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "input": { "const": "select" } } },
+          "then": { "required": ["options"] }
+        }
+      ]
+    },
+    "snippetField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": [
+            "text",
+            "select",
+            "email",
+            "password",
+            "url",
+            "ip",
+            "number",
+            "slider",
+            "date",
+            "color",
+            "list",
+            "toggle",
+            "bool"
+          ]
+        },
+        "placeholder": { "type": "string" },
+        "validate": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pattern", "error"],
+            "properties": {
+              "pattern": { "type": "string" },
+              "error": { "type": "string" }
+            }
+          }
+        },
+        "min": { "type": ["number", "string"] },
+        "max": { "type": ["number", "string"] },
+        "step": { "type": ["number", "string"] },
+        "default": {},
+        "format": { "type": "string" },
+        "options": {
+          "oneOf": [
+            { "type": "array", "items": { "type": "string" } },
+            { "type": "string" }
+          ]
+        },
+        "active": { "type": "string" },
+        "inactive": { "type": "string" }
+      }
+    },
+    "conditionStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["condition", "if", "steps"],
+      "properties": {
+        "condition": {},
+        "if": { "type": "string" },
+        "steps": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/step" }
+        }
+      }
+    },
+    "loopStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["loop", "items", "variable", "steps"],
+      "properties": {
+        "loop": {},
+        "items": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "separator": { "type": "string" },
+        "variable": { "type": "string" },
+        "steps": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/step" }
+        }
+      }
+    }
+  }
+}

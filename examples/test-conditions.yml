@@ -1,0 +1,69 @@
+steps:
+  - component: select
+    prompt: "Choose deployment type"
+    options:
+      - development
+      - production
+    variable: deployment_type
+
+  - condition:
+      if: "deployment_type == 'production'"
+      steps:
+        - output: info
+          value: "Production mode selected - additional configuration required"
+        - loop:
+          items:
+            - "test 1"
+            - "test 2"
+          variable: server
+          steps:
+            - output: info
+              value: "Configuring {{deployment_type}} {{server}})"
+
+        - input: text
+          prompt: "Enter production domain"
+          default: "example.com"
+          variable: domain
+
+        - input: text
+          prompt: "Enter admin email"
+          validate:
+            - pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+              error: "Invalid email format"
+          variable: admin_email
+
+  - condition:
+      if: "deployment_type == 'development'"
+      steps:
+        - output: info
+          value: "Development mode - using defaults"
+
+        - input: text
+          prompt: "Enter local port"
+          default: "3000"
+          variable: port
+
+  - input: slider
+    prompt: "Select number of workers"
+    min: 1
+    max: 10
+    step: 1
+    default: 2
+    variable: workers
+
+  - condition:
+      if: "workers > 5"
+      steps:
+        - output: info
+          value: "High worker count detected - enabling cluster mode"
+
+        - component: select
+          prompt: "Choose load balancing strategy"
+          options:
+            - round-robin
+            - least-connections
+            - ip-hash
+          variable: lb_strategy
+
+  - output: info
+    value: "Configuration complete! Deployment: {{deployment_type}}, Workers: {{workers}}"
