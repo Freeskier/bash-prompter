@@ -1,25 +1,16 @@
-use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashMap;
+use std::io::Result;
 
-/// Actions that can be triggered by key bindings
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Action {
-    /// Move cursor up
     MoveUp,
-    /// Move cursor down
     MoveDown,
-    /// Move cursor left
     MoveLeft,
-    /// Move cursor right
     MoveRight,
-    /// Exit the application
     Exit,
-    /// Custom action with a name
-    Custom(String),
 }
 
-/// Key binding configuration
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KeyBinding {
     pub code: KeyCode,
@@ -39,26 +30,20 @@ impl KeyBinding {
     }
 }
 
-/// Event listener callback type
 pub type EventListener = Box<dyn FnMut(&Action) + Send>;
 
-/// Input manager with configurable key bindings and event system
 pub struct InputManager {
-    /// Key bindings map: KeyBinding -> Action
-    pub bindings: HashMap<KeyBinding, Action>,
-    /// Event listeners: Action -> Vec<Callback>
+    bindings: HashMap<KeyBinding, Action>,
     listeners: HashMap<Action, Vec<EventListener>>,
 }
 
 impl InputManager {
-    /// Create new InputManager with default bindings
     pub fn new() -> Self {
         let mut manager = Self {
             bindings: HashMap::new(),
             listeners: HashMap::new(),
         };
 
-        // Default bindings
         manager.bind(
             KeyBinding::new(KeyCode::Up, KeyModifiers::NONE),
             Action::MoveUp,
@@ -83,17 +68,14 @@ impl InputManager {
         manager
     }
 
-    /// Bind a key combination to an action
     pub fn bind(&mut self, key_binding: KeyBinding, action: Action) {
         self.bindings.insert(key_binding, action);
     }
 
-    /// Unbind a key combination
     pub fn unbind(&mut self, key_binding: &KeyBinding) {
         self.bindings.remove(key_binding);
     }
 
-    /// Subscribe to an action with a callback
     pub fn on<F>(&mut self, action: Action, callback: F)
     where
         F: FnMut(&Action) + Send + 'static,
@@ -104,7 +86,6 @@ impl InputManager {
             .push(Box::new(callback));
     }
 
-    /// Handle an incoming terminal event
     pub fn handle_event(&mut self, event: Event) -> Result<bool> {
         match event {
             Event::Key(key_event) => {
@@ -117,15 +98,11 @@ impl InputManager {
 
                 Ok(false)
             }
-            Event::Resize(_, _) => {
-                // Handle resize if needed
-                Ok(false)
-            }
+            Event::Resize(_, _) => Ok(false),
             _ => Ok(false),
         }
     }
 
-    /// Dispatch an action to all registered listeners
     fn dispatch(&mut self, action: &Action) {
         if let Some(listeners) = self.listeners.get_mut(action) {
             for listener in listeners.iter_mut() {
