@@ -1,5 +1,5 @@
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
-use crossterm::terminal;
+use crossterm::{execute, terminal};
 use rust_v2::drawable::{Display, Wrap};
 use rust_v2::layout::Layout;
 use rust_v2::renderer::Renderer;
@@ -10,6 +10,8 @@ use std::io::{self, Write};
 fn main() {
     terminal::enable_raw_mode().unwrap();
     let mut stdout = io::stdout();
+
+    execute!(stdout, terminal::DisableLineWrap).unwrap();
 
     let mut terminal = TerminalState::new().unwrap();
     let layout = Layout::new();
@@ -56,6 +58,7 @@ fn main() {
         }
     }
 
+    execute!(stdout, terminal::EnableLineWrap).unwrap();
     terminal::disable_raw_mode().unwrap();
 }
 
