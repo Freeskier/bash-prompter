@@ -19,11 +19,11 @@ fn main() {
 
     terminal::enable_raw_mode().unwrap();
     execute!(stdout, terminal::DisableLineWrap).unwrap();
-    execute!(stdout, Print(text.to_string())).unwrap();
+    //execute!(stdout, Print(text.to_string())).unwrap();
     let anchor_row = cursor::position().unwrap().1;
 
     loop {
-        if poll(Duration::from_millis(300)).unwrap() {
+        if poll(Duration::from_millis(0)).unwrap() {
             match event::read().unwrap() {
                 Event::Key(key) => {
                     if key.code == KeyCode::Char('c')
@@ -34,6 +34,7 @@ fn main() {
                 }
                 Event::Resize(new_width, new_height) => {
                     let max_display_width = new_width.saturating_sub(5) as usize;
+
                     let mut display_text = String::new();
                     let mut current_width = 0;
 
@@ -55,6 +56,7 @@ fn main() {
                         Print(format!("{}", display_text))
                     )
                     .unwrap();
+                    execute!(stdout, terminal::EnableLineWrap).unwrap();
                 }
 
                 _ => {}
