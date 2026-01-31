@@ -14,16 +14,36 @@ use unicode_width::UnicodeWidthStr;
 
 fn main() {
     let mut stdout = io::stdout();
-    let text =
-        "This is a sample text with ten words here This is a sample text with ten words here";
 
     terminal::enable_raw_mode().unwrap();
-    execute!(stdout, terminal::DisableLineWrap).unwrap();
-    //execute!(stdout, Print(text.to_string())).unwrap();
-    let anchor_row = cursor::position().unwrap().1;
+
+    let mut anchor_row = cursor::position().unwrap().1;
+    let mut previous_anchor_row = anchor_row;
+    execute!(
+        stdout,
+        cursor::MoveTo(0, anchor_row),
+        Print(format!("{}", anchor_row))
+    )
+    .unwrap();
+    stdout.flush().unwrap();
 
     loop {
-        if poll(Duration::from_millis(0)).unwrap() {
+        let current_anchor_row = cursor::position().unwrap().1;
+        if current_anchor_row != previous_anchor_row {
+            anchor_row = current_anchor_row;
+
+            execute!(
+                stdout,
+                cursor::MoveTo(0, anchor_row),
+                Print(format!("{}", anchor_row))
+            )
+            .unwrap();
+            stdout.flush().unwrap();
+
+            previous_anchor_row = anchor_row;
+        }
+
+        if poll(Duration::from_millis(50)).unwrap() {
             match event::read().unwrap() {
                 Event::Key(key) => {
                     if key.code == KeyCode::Char('c')
@@ -32,48 +52,110 @@ fn main() {
                         break;
                     }
                 }
-                Event::Resize(new_width, new_height) => {
-                    let max_display_width = new_width.saturating_sub(5) as usize;
+                Event::Resize(_, _) => {
+                    let new_anchor_row = cursor::position().unwrap().1;
+                    if new_anchor_row != previous_anchor_row {
+                        anchor_row = new_anchor_row;
 
-                    let mut display_text = String::new();
-                    let mut current_width = 0;
+                        execute!(
+                            stdout,
+                            cursor::MoveTo(0, anchor_row),
+                            Print(format!("{}", anchor_row))
+                        )
+                        .unwrap();
+                        stdout.flush().unwrap();
 
-                    for ch in text.chars() {
-                        let char_width = ch.to_string().width();
-                        if current_width + char_width > max_display_width {
-                            break;
-                        }
-                        display_text.push(ch);
-                        current_width += char_width;
+                        previous_anchor_row = anchor_row;
                     }
-
-                    execute!(stdout, terminal::DisableLineWrap).unwrap();
-
-                    execute!(
-                        stdout,
-                        cursor::MoveTo(0, anchor_row),
-                        terminal::Clear(terminal::ClearType::CurrentLine),
-                        Print(format!("{}", display_text))
-                    )
-                    .unwrap();
-                    execute!(stdout, terminal::EnableLineWrap).unwrap();
                 }
-
                 _ => {}
             }
         }
     }
-
-    // Cleanup - przenieś się do linii poniżej
-    // execute!(
-    //     stdout,
-    //     cursor::MoveTo(0, initial_anchor_row.saturating_add(1)),
-    //     terminal::Clear(terminal::ClearType::CurrentLine)
-    // )
-    // .unwrap();
-    execute!(stdout, terminal::EnableLineWrap).unwrap();
     terminal::disable_raw_mode().unwrap();
 }
+
+// fn main() {
+//     let mut stdout = io::stdout();
+//     let text =
+//         "This is a sample text with ten words here This is a sample text with ten words here";
+
+//     terminal::enable_raw_mode().unwrap();
+//     execute!(stdout, terminal::DisableLineWrap).unwrap();
+//     //execute!(stdout, Print(text.to_string())).unwrap();
+//     let mut anchor_row = cursor::position().unwrap().1;
+
+//     loop {
+//         // Dynamicznie śledź anchor_row
+//         // let current_anchor_row = cursor::position().unwrap().1;
+//         // if current_anchor_row != anchor_row {
+//         //     anchor_row = current_anchor_row;
+//         // }
+
+//         // // Wyświetl anchor_row w prawym górnym rogu
+//         // stdout.flush().unwrap();
+
+//         if poll(Duration::from_millis(0)).unwrap() {
+//             match event::read().unwrap() {
+//                 Event::Key(key) => {
+//                     if key.code == KeyCode::Char('c')
+//                         && key.modifiers.contains(KeyModifiers::CONTROL)
+//                     {
+//                         break;
+//                     }
+//                     if key.code == KeyCode::Char('d') {
+//                         execute!(stdout, Print("dupas".to_string())).unwrap();
+//                     }
+//                 }
+//                 Event::Resize(new_width, new_height) => {
+//                     // execute!(
+//                     //     stdout,
+//                     //     cursor::MoveTo(0, anchor_row),
+//                     //     terminal::Clear(terminal::ClearType::FromCursorDown)
+//                     // )
+//                     // .unwrap();
+//                     let max_display_width = new_width.saturating_sub(5) as usize;
+
+//                     let mut display_text = String::new();
+//                     let mut current_width = 0;
+
+//                     for ch in text.chars() {
+//                         let char_width = ch.to_string().width();
+//                         if current_width + char_width > max_display_width {
+//                             break;
+//                         }
+//                         display_text.push(ch);
+//                         current_width += char_width;
+//                     }
+
+//                     execute!(stdout, terminal::DisableLineWrap).unwrap();
+
+//                     execute!(
+//                         stdout,
+//                         cursor::MoveTo(0, anchor_row),
+//                         terminal::Clear(terminal::ClearType::FromCursorDown),
+//                         Print(format!("{}", display_text))
+//                     )
+//                     .unwrap();
+
+//                     execute!(stdout, terminal::EnableLineWrap).unwrap();
+//                 }
+
+//                 _ => {}
+//             }
+//         }
+//     }
+
+//     // Cleanup - przenieś się do linii poniżej
+//     // execute!(
+//     //     stdout,
+//     //     cursor::MoveTo(0, initial_anchor_row.saturating_add(1)),
+//     //     terminal::Clear(terminal::ClearType::CurrentLine)
+//     // )
+//     // .unwrap();
+//     execute!(stdout, terminal::EnableLineWrap).unwrap();
+//     terminal::disable_raw_mode().unwrap();
+// }
 
 // fn main() {
 //     //terminal::enable_raw_mode().unwrap();
