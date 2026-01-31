@@ -12,38 +12,55 @@ use std::thread;
 use std::time::Duration;
 use unicode_width::UnicodeWidthStr;
 
+fn render_line(stdout: &mut impl Write, anchor_row: u16, text: &str) {
+    // Oblicz maksymalną szerokość tekstu
+    let (terminal_width, _) = terminal::size().unwrap();
+    let anchor_str = format!("{}", anchor_row);
+    let max_text_width = terminal_width.saturating_sub(anchor_str.len() as u16 + 1) as usize;
+
+    // Obetnij tekst do szerokości terminala
+    let mut display_text = String::new();
+    let mut current_width = 0;
+    for ch in text.chars() {
+        let char_width = ch.to_string().width();
+        if current_width + char_width > max_text_width {
+            break;
+        }
+        display_text.push(ch);
+        current_width += char_width;
+    }
+
+    execute!(
+        stdout,
+        cursor::MoveTo(0, anchor_row),
+        terminal::Clear(terminal::ClearType::FromCursorDown),
+        Print(format!("{} {}", anchor_row, display_text)),
+        cursor::MoveTo(0, anchor_row)
+    )
+    .unwrap();
+    stdout.flush().unwrap();
+}
+
 fn main() {
     let mut stdout = io::stdout();
-
+    let text = "This is a sample This is a sample This is a sample ";
     terminal::enable_raw_mode().unwrap();
 
     let mut anchor_row = cursor::position().unwrap().1;
     let mut previous_anchor_row = anchor_row;
-    execute!(
-        stdout,
-        cursor::MoveTo(0, anchor_row),
-        Print(format!("{}", anchor_row))
-    )
-    .unwrap();
-    stdout.flush().unwrap();
+    execute!(stdout, terminal::DisableLineWrap).unwrap();
+
+    render_line(&mut stdout, anchor_row, text);
 
     loop {
         let current_anchor_row = cursor::position().unwrap().1;
         if current_anchor_row != previous_anchor_row {
             anchor_row = current_anchor_row;
-
-            execute!(
-                stdout,
-                cursor::MoveTo(0, anchor_row),
-                Print(format!("{}", anchor_row))
-            )
-            .unwrap();
-            stdout.flush().unwrap();
-
+            render_line(&mut stdout, anchor_row, text);
             previous_anchor_row = anchor_row;
         }
 
-        if poll(Duration::from_millis(50)).unwrap() {
+        if poll(Duration::from_millis(0)).unwrap() {
             match event::read().unwrap() {
                 Event::Key(key) => {
                     if key.code == KeyCode::Char('c')
@@ -54,24 +71,18 @@ fn main() {
                 }
                 Event::Resize(_, _) => {
                     let new_anchor_row = cursor::position().unwrap().1;
-                    if new_anchor_row != previous_anchor_row {
-                        anchor_row = new_anchor_row;
-
-                        execute!(
-                            stdout,
-                            cursor::MoveTo(0, anchor_row),
-                            Print(format!("{}", anchor_row))
-                        )
-                        .unwrap();
-                        stdout.flush().unwrap();
-
-                        previous_anchor_row = anchor_row;
-                    }
+                    anchor_row = new_anchor_row;
+                    render_line(&mut stdout, anchor_row, text);
+                    previous_anchor_row = anchor_row;
                 }
                 _ => {}
             }
         }
+        thread::sleep(Duration::from_millis(50));
     }
+
+    // Cleanup
+    execute!(stdout, terminal::EnableLineWrap).unwrap();
     terminal::disable_raw_mode().unwrap();
 }
 
