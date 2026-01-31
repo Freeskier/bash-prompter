@@ -1,5 +1,6 @@
 use crate::drawable::Wrap;
 use crate::style::Style;
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Span {
@@ -40,42 +41,55 @@ impl Span {
     }
 
     pub fn width(&self) -> usize {
-        self.text.chars().count()
+        self.text.width()
     }
 
     pub fn split_at_width(&self, max: usize) -> (Span, Option<Span>) {
         if max == 0 {
-            return (Span::new(String::new()), Some(self.clone()));
+            return (self.clone_empty(), Some(self.clone()));
         }
 
-        if self.width() <= max {
+        let total_width = self.width();
+        if total_width <= max {
             return (self.clone(), None);
         }
 
-        let mut left = String::new();
-        let mut iter = self.text.chars();
-        for _ in 0..max {
-            if let Some(ch) = iter.next() {
-                left.push(ch);
-            } else {
-                return (self.clone(), None);
+        // Znajdź punkt podziału uwzględniając szerokość unicode
+        let mut current_width = 0;
+        let mut split_idx = 0;
+        for (idx, ch) in self.text.char_indices() {
+            let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            if current_width + char_width > max {
+                break;
             }
+            current_width += char_width;
+            split_idx = idx + ch.len_utf8();
         }
-        let right: String = iter.collect();
+
+        let (left, right) = self.text.split_at(split_idx);
+
         let tail = if right.is_empty() {
             None
         } else {
-            Some(
-                Span::new(right)
-                    .with_style(self.style.clone())
-                    .with_wrap(self.wrap),
-            )
+            Some(self.clone_with_text(right))
         };
-        (
-            Span::new(left)
-                .with_style(self.style.clone())
-                .with_wrap(self.wrap),
-            tail,
-        )
+
+        (self.clone_with_text(left), tail)
+    }
+
+    fn clone_empty(&self) -> Span {
+        Span {
+            text: String::new(),
+            style: self.style.clone(),
+            wrap: self.wrap,
+        }
+    }
+
+    fn clone_with_text(&self, text: &str) -> Span {
+        Span {
+            text: text.to_string(),
+            style: self.style.clone(),
+            wrap: self.wrap,
+        }
     }
 }

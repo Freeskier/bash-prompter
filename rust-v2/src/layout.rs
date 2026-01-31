@@ -3,109 +3,137 @@ use crate::frame::Frame;
 use crate::span::Span;
 
 #[derive(Clone, Debug, Default)]
-pub struct Layout;
+pub struct Layout {
+    margin: usize,
+}
 
 impl Layout {
     pub fn new() -> Self {
-        Self
+        Self { margin: 2 }
+    }
+
+    pub fn with_margin(mut self, margin: usize) -> Self {
+        self.margin = margin;
+        self
     }
 
     pub fn compose<'a, I>(&self, drawables: I, width: u16) -> Frame
     where
         I: IntoIterator<Item = &'a dyn Drawable>,
     {
-        let width = width.saturating_sub(2) as usize;
-        let mut frame = Frame::new();
-        frame.ensure_line();
-        let mut current_width = 0usize;
+        let mut ctx = LayoutContext::new(width as usize, self.margin);
 
         for drawable in drawables {
-            if drawable.display() == Display::Block && current_width != 0 {
-                frame.new_line();
-                current_width = 0;
-            }
-
-            for span in drawable.spans() {
-                self.place_span(&mut frame, &mut current_width, span, width);
-            }
-
-            if drawable.display() == Display::Block && current_width != 0 {
-                frame.new_line();
-                current_width = 0;
-            }
+            ctx.place_drawable(drawable);
         }
 
-        frame.trim_trailing_empty();
-        frame
+        ctx.finish()
+    }
+}
+
+struct LayoutContext {
+    frame: Frame,
+    width: usize,
+    current_width: usize,
+}
+
+impl LayoutContext {
+    fn new(width: usize, margin: usize) -> Self {
+        let width = width.saturating_sub(margin);
+        let mut frame = Frame::new();
+        frame.ensure_line();
+        Self {
+            frame,
+            width,
+            current_width: 0,
+        }
     }
 
-    fn place_span(&self, frame: &mut Frame, current_width: &mut usize, span: Span, width: usize) {
-        if width == 0 || span.width() == 0 {
+    fn place_drawable(&mut self, drawable: &dyn Drawable) {
+        if drawable.display() == Display::Block && self.current_width > 0 {
+            self.new_line();
+        }
+
+        for span in drawable.spans() {
+            self.place_span(span);
+        }
+
+        if drawable.display() == Display::Block && self.current_width > 0 {
+            self.new_line();
+        }
+    }
+
+    fn place_span(&mut self, span: Span) {
+        if self.width == 0 || span.width() == 0 {
             return;
         }
 
         match span.wrap() {
-            Wrap::No => self.place_no_wrap(frame, current_width, span, width),
-            Wrap::Yes => self.place_wrap(frame, current_width, span, width),
+            Wrap::No => self.place_no_wrap(span),
+            Wrap::Yes => self.place_wrap(span),
         }
     }
 
-    fn place_no_wrap(
-        &self,
-        frame: &mut Frame,
-        current_width: &mut usize,
-        span: Span,
-        width: usize,
-    ) {
+    fn place_no_wrap(&mut self, span: Span) {
         let span_width = span.width();
-        if *current_width != 0 && span_width > width - *current_width {
-            frame.new_line();
-            *current_width = 0;
+
+        // Jeśli nie mieści się w aktualnej linii, przejdź do nowej
+        if self.current_width > 0 && span_width > self.available_width() {
+            self.new_line();
         }
 
-        let (head, _) = if span_width > width {
-            span.split_at_width(width)
+        // Przytnij jeśli przekracza całą szerokość
+        let (head, _) = if span_width > self.width {
+            span.split_at_width(self.width)
         } else {
             (span, None)
         };
 
-        frame.current_line_mut().push(head);
-        *current_width = (*current_width + span_width).min(width);
+        self.push_span(head);
     }
 
-    fn place_wrap(
-        &self,
-        frame: &mut Frame,
-        current_width: &mut usize,
-        mut span: Span,
-        width: usize,
-    ) {
-        loop {
-            if *current_width == width {
-                frame.new_line();
-                *current_width = 0;
+    fn place_wrap(&mut self, mut span: Span) {
+        while span.width() > 0 {
+            if self.current_width >= self.width {
+                self.new_line();
             }
 
-            let available = width - *current_width;
+            let available = self.available_width();
             if span.width() <= available {
-                let span_width = span.width();
-                frame.current_line_mut().push(span);
-                *current_width += span_width;
+                self.push_span(span);
                 return;
             }
 
             let (head, tail) = span.split_at_width(available);
             if head.width() > 0 {
-                frame.current_line_mut().push(head);
+                self.push_span(head);
             }
-            frame.new_line();
-            *current_width = 0;
+            self.new_line();
 
-            if let Some(next) = tail {
-                span = next;
-            } else {
-                return;
+            match tail {
+                Some(rest) => span = rest,
+                None => return,
             }
         }
+    }
+
+    fn push_span(&mut self, span: Span) {
+        let w = span.width();
+        self.frame.current_line_mut().push(span);
+        self.current_width += w;
+    }
+
+    fn new_line(&mut self) {
+        self.frame.new_line();
+        self.current_width = 0;
+    }
+
+    fn available_width(&self) -> usize {
+        self.width.saturating_sub(self.current_width)
+    }
+
+    fn finish(mut self) -> Frame {
+        self.frame.trim_trailing_empty();
+        self.frame
     }
 }

@@ -1,328 +1,127 @@
-use crossterm::event::{self, Event, KeyCode, KeyModifiers, poll};
-use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
+use crossterm::event::{self, poll};
 use crossterm::{cursor, execute, terminal};
 use rust_v2::drawable::{Display, Wrap};
+use rust_v2::event::{Action, AppEvent, EventType};
+use rust_v2::event_emitter::EventEmitter;
+use rust_v2::input_manager::InputManager;
 use rust_v2::layout::Layout;
 use rust_v2::renderer::Renderer;
 use rust_v2::terminal_state::TerminalState;
 use rust_v2::text::Text;
-use std::fs::OpenOptions;
+use std::cell::RefCell;
 use std::io::{self, Write};
-use std::thread;
+use std::rc::Rc;
 use std::time::Duration;
-use unicode_width::UnicodeWidthStr;
-
-fn render_line(stdout: &mut impl Write, anchor_row: u16, text: &str) {
-    // Oblicz maksymalną szerokość tekstu
-    let (terminal_width, _) = terminal::size().unwrap();
-    let anchor_str = format!("{}", anchor_row);
-    let max_text_width = terminal_width.saturating_sub(anchor_str.len() as u16 + 1) as usize;
-
-    // Obetnij tekst do szerokości terminala
-    let mut display_text = String::new();
-    let mut current_width = 0;
-    for ch in text.chars() {
-        let char_width = ch.to_string().width();
-        if current_width + char_width > max_text_width {
-            break;
-        }
-        display_text.push(ch);
-        current_width += char_width;
-    }
-
-    execute!(
-        stdout,
-        cursor::MoveTo(0, anchor_row),
-        terminal::Clear(terminal::ClearType::FromCursorDown),
-        Print(format!("{} {}", anchor_row, display_text)),
-        cursor::MoveTo(0, anchor_row)
-    )
-    .unwrap();
-    stdout.flush().unwrap();
-}
 
 fn main() {
-    let mut stdout = io::stdout();
-    let text = "This is a sample This is a sample This is a sample ";
-    terminal::enable_raw_mode().unwrap();
-
-    let mut anchor_row = cursor::position().unwrap().1;
-    let mut previous_anchor_row = anchor_row;
-    execute!(stdout, terminal::DisableLineWrap).unwrap();
-
-    render_line(&mut stdout, anchor_row, text);
-
-    loop {
-        let current_anchor_row = cursor::position().unwrap().1;
-        if current_anchor_row != previous_anchor_row {
-            anchor_row = current_anchor_row;
-            render_line(&mut stdout, anchor_row, text);
-            previous_anchor_row = anchor_row;
-        }
-
-        if poll(Duration::from_millis(0)).unwrap() {
-            match event::read().unwrap() {
-                Event::Key(key) => {
-                    if key.code == KeyCode::Char('c')
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
-                    {
-                        break;
-                    }
-                }
-                Event::Resize(_, _) => {
-                    let new_anchor_row = cursor::position().unwrap().1;
-                    anchor_row = new_anchor_row;
-                    render_line(&mut stdout, anchor_row, text);
-                    previous_anchor_row = anchor_row;
-                }
-                _ => {}
-            }
-        }
-        thread::sleep(Duration::from_millis(50));
+    if let Err(e) = run() {
+        eprintln!("Error: {}", e);
     }
-
-    // Cleanup
-    execute!(stdout, terminal::EnableLineWrap).unwrap();
-    terminal::disable_raw_mode().unwrap();
 }
 
-// fn main() {
-//     let mut stdout = io::stdout();
-//     let text =
-//         "This is a sample text with ten words here This is a sample text with ten words here";
+fn run() -> io::Result<()> {
+    let mut stdout = io::stdout();
 
-//     terminal::enable_raw_mode().unwrap();
-//     execute!(stdout, terminal::DisableLineWrap).unwrap();
-//     //execute!(stdout, Print(text.to_string())).unwrap();
-//     let mut anchor_row = cursor::position().unwrap().1;
+    terminal::enable_raw_mode()?;
+    execute!(stdout, terminal::DisableLineWrap)?;
 
-//     loop {
-//         // Dynamicznie śledź anchor_row
-//         // let current_anchor_row = cursor::position().unwrap().1;
-//         // if current_anchor_row != anchor_row {
-//         //     anchor_row = current_anchor_row;
-//         // }
+    let result = event_loop(&mut stdout);
 
-//         // // Wyświetl anchor_row w prawym górnym rogu
-//         // stdout.flush().unwrap();
+    // Cleanup
+    execute!(stdout, cursor::MoveToNextLine(1))?;
+    execute!(stdout, terminal::EnableLineWrap)?;
+    terminal::disable_raw_mode()?;
 
-//         if poll(Duration::from_millis(0)).unwrap() {
-//             match event::read().unwrap() {
-//                 Event::Key(key) => {
-//                     if key.code == KeyCode::Char('c')
-//                         && key.modifiers.contains(KeyModifiers::CONTROL)
-//                     {
-//                         break;
-//                     }
-//                     if key.code == KeyCode::Char('d') {
-//                         execute!(stdout, Print("dupas".to_string())).unwrap();
-//                     }
-//                 }
-//                 Event::Resize(new_width, new_height) => {
-//                     // execute!(
-//                     //     stdout,
-//                     //     cursor::MoveTo(0, anchor_row),
-//                     //     terminal::Clear(terminal::ClearType::FromCursorDown)
-//                     // )
-//                     // .unwrap();
-//                     let max_display_width = new_width.saturating_sub(5) as usize;
+    result
+}
 
-//                     let mut display_text = String::new();
-//                     let mut current_width = 0;
+fn event_loop(stdout: &mut io::Stdout) -> io::Result<()> {
+    let mut terminal = TerminalState::new()?;
+    let layout = Layout::new();
+    let mut renderer = Renderer::new();
+    let input_manager = InputManager::new();
+    let mut emitter = EventEmitter::new();
 
-//                     for ch in text.chars() {
-//                         let char_width = ch.to_string().width();
-//                         if current_width + char_width > max_display_width {
-//                             break;
-//                         }
-//                         display_text.push(ch);
-//                         current_width += char_width;
-//                     }
+    let drawables = vec![
+        Text::new("Tutaj pisze testowy tekst Tutaj pisze testowy tekst Tutaj pisze testowy tekst ")
+            .with_display(Display::Inline),
+        Text::new("[DATE]")
+            .with_display(Display::Inline)
+            .with_wrap(Wrap::No),
+        Text::new(" tutaj dalej tekst").with_display(Display::Inline),
+        Text::new("Nastepna linia blokowa.").with_display(Display::Block),
+    ];
 
-//                     execute!(stdout, terminal::DisableLineWrap).unwrap();
+    // Stan współdzielony przez handlery
+    let should_exit = Rc::new(RefCell::new(false));
+    let needs_rerender = Rc::new(RefCell::new(false));
 
-//                     execute!(
-//                         stdout,
-//                         cursor::MoveTo(0, anchor_row),
-//                         terminal::Clear(terminal::ClearType::FromCursorDown),
-//                         Print(format!("{}", display_text))
-//                     )
-//                     .unwrap();
+    // Subskrypcja na Exit
+    {
+        let should_exit = Rc::clone(&should_exit);
+        emitter.on(EventType::Action, move |event| {
+            if let AppEvent::Action(Action::Exit) = event {
+                *should_exit.borrow_mut() = true;
+            }
+        });
+    }
 
-//                     execute!(stdout, terminal::EnableLineWrap).unwrap();
-//                 }
+    // Subskrypcja na Resize
+    {
+        let needs_rerender = Rc::clone(&needs_rerender);
+        emitter.on(EventType::Resize, move |_| {
+            *needs_rerender.borrow_mut() = true;
+        });
+    }
 
-//                 _ => {}
-//             }
-//         }
-//     }
+    // Początkowy render
+    render(&layout, &drawables, &mut terminal, &mut renderer, stdout)?;
 
-//     // Cleanup - przenieś się do linii poniżej
-//     // execute!(
-//     //     stdout,
-//     //     cursor::MoveTo(0, initial_anchor_row.saturating_add(1)),
-//     //     terminal::Clear(terminal::ClearType::CurrentLine)
-//     // )
-//     // .unwrap();
-//     execute!(stdout, terminal::EnableLineWrap).unwrap();
-//     terminal::disable_raw_mode().unwrap();
-// }
+    loop {
+        if *should_exit.borrow() {
+            break;
+        }
 
-// fn main() {
-//     //terminal::enable_raw_mode().unwrap();
-//     let mut stdout = io::stdout();
+        if !poll(Duration::from_millis(100))? {
+            // Sprawdź czy anchor się zmienił (np. przez scroll)
+            if let Some(prev_anchor) = renderer.anchor_row() {
+                let (_, current_row) = cursor::position()?;
+                if current_row != prev_anchor {
+                    render_at(
+                        &layout,
+                        &drawables,
+                        &mut terminal,
+                        &mut renderer,
+                        stdout,
+                        current_row,
+                    )?;
+                }
+            }
+            continue;
+        }
 
-//     execute!(stdout, terminal::DisableLineWrap).unwrap();
+        // Przetwórz event przez InputManager
+        let raw_event = event::read()?;
+        input_manager.process(raw_event, &mut emitter);
 
-//     // Braille spinner characters
-//     let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-//     let text =
-//         "This is a sample text with ten words here This is a sample text with ten words here";
+        // Sprawdź czy potrzebny rerender (np. po resize)
+        if *needs_rerender.borrow() {
+            *needs_rerender.borrow_mut() = false;
+            terminal.refresh()?;
+            let (_, row) = cursor::position()?;
+            render_at(
+                &layout,
+                &drawables,
+                &mut terminal,
+                &mut renderer,
+                stdout,
+                row,
+            )?;
+        }
+    }
 
-//     let mut spinner_index = 0;
-//     let mut initial_anchor_row = cursor::position().unwrap().1;
-
-//     // Zmienna do przechowywania aktualnej szerokości terminala
-
-//     loop {
-//         initial_anchor_row = cursor::position().unwrap().1;
-
-//         // Zaktualizuj spinner
-//         spinner_index = (spinner_index + 1) % spinner_chars.len();
-
-//         // Czekaj 100ms lub sprawdź czy jest event
-//         if poll(Duration::from_millis(300)).unwrap() {
-//             match event::read().unwrap() {
-//                 Event::Key(key) => {
-//                     if key.code == KeyCode::Char('c')
-//                         && key.modifiers.contains(KeyModifiers::CONTROL)
-//                     {
-//                         break;
-//                     }
-//                 }
-//                 Event::Resize(new_width, new_height) => {
-//                     //thread::sleep(Duration::from_millis(700));
-
-//                     let max_display_width = new_width.saturating_sub(15) as usize;
-
-//                     let mut display_text = String::new();
-//                     let mut current_width = 0;
-
-//                     for ch in text.chars() {
-//                         let char_width = ch.to_string().width();
-//                         if current_width + char_width > max_display_width {
-//                             break;
-//                         }
-//                         display_text.push(ch);
-//                         current_width += char_width;
-//                     }
-
-//                     execute!(stdout, terminal::DisableLineWrap).unwrap();
-
-//                     execute!(
-//                         stdout,
-//                         cursor::MoveTo(0, initial_anchor_row),
-//                         terminal::Clear(terminal::ClearType::CurrentLine),
-//                         Print(format!("{} {}", spinner_chars[spinner_index], display_text))
-//                     )
-//                     .unwrap();
-
-//                     stdout.flush().unwrap();
-
-//                     // Zaktualizuj zmienną z szerokością terminala
-
-//                     // Wyświetl czerwony znak w prawym górnym rogu
-//                     execute!(
-//                         stdout,
-//                         cursor::MoveTo(new_width.saturating_sub(1), 0),
-//                         SetForegroundColor(Color::Red),
-//                         Print("●"),
-//                         ResetColor
-//                     )
-//                     .unwrap();
-//                     stdout.flush().unwrap();
-
-//                     // Czekaj 1 sekundę
-//                     thread::sleep(Duration::from_millis(1000));
-
-//                     // Wyczyść ten znak
-//                     execute!(
-//                         stdout,
-//                         cursor::MoveTo(new_width.saturating_sub(1), 0),
-//                         Print(" ")
-//                     )
-//                     .unwrap();
-//                 }
-//                 _ => {}
-//             }
-//         }
-//     }
-
-//     // Cleanup - przenieś się do linii poniżej
-//     execute!(
-//         stdout,
-//         cursor::MoveTo(0, initial_anchor_row.saturating_add(1)),
-//         terminal::Clear(terminal::ClearType::CurrentLine)
-//     )
-//     .unwrap();
-//     execute!(stdout, terminal::EnableLineWrap).unwrap();
-//     terminal::disable_raw_mode().unwrap();
-// }
-
-// fn main() {
-//     terminal::enable_raw_mode().unwrap();
-//     let mut stdout = io::stdout();
-
-//     execute!(stdout, terminal::DisableLineWrap).unwrap();
-
-//     let mut terminal = TerminalState::new().unwrap();
-//     let layout = Layout::new();
-//     let mut renderer = Renderer::new();
-
-//     let drawables = vec![
-//         Text::new("Tutaj pisze testowy tekst Tutaj pisze testowy tekst Tutaj pisze testowy tekst ")
-//             .with_display(Display::Inline),
-//         Text::new("[DATE]")
-//             .with_display(Display::Inline)
-//             .with_wrap(Wrap::No),
-//         Text::new(" tutaj dalej tekst").with_display(Display::Inline),
-//         Text::new("Nastepna linia blokowa.").with_display(Display::Block),
-//     ];
-
-//     render(
-//         &layout,
-//         &drawables,
-//         &mut terminal,
-//         &mut renderer,
-//         &mut stdout,
-//     );
-
-//     let mut running = true;
-//     while running {
-//         let event = event::read().unwrap();
-//         match event {
-//             Event::Resize(_, _) => {
-//                 terminal.refresh().unwrap();
-//                 render(
-//                     &layout,
-//                     &drawables,
-//                     &mut terminal,
-//                     &mut renderer,
-//                     &mut stdout,
-//                 );
-//             }
-//             Event::Key(key) => {
-//                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-//                     running = false;
-//                 }
-//             }
-//             _ => {}
-//         }
-//     }
-
-//     execute!(stdout, terminal::EnableLineWrap).unwrap();
-//     terminal::disable_raw_mode().unwrap();
-// }
+    Ok(())
+}
 
 fn render(
     layout: &Layout,
@@ -330,15 +129,31 @@ fn render(
     terminal: &mut TerminalState,
     renderer: &mut Renderer,
     out: &mut impl Write,
-) {
-    terminal.refresh().unwrap();
-    let width = terminal.width();
+) -> io::Result<()> {
+    terminal.refresh()?;
     let frame = layout.compose(
         drawables
             .iter()
             .map(|d| d as &dyn rust_v2::drawable::Drawable),
-        width,
+        terminal.width(),
     );
-    renderer.render_to(&frame, out).unwrap();
-    out.flush().unwrap();
+    renderer.render(&frame, out)
+}
+
+fn render_at(
+    layout: &Layout,
+    drawables: &[Text],
+    terminal: &mut TerminalState,
+    renderer: &mut Renderer,
+    out: &mut impl Write,
+    anchor: u16,
+) -> io::Result<()> {
+    terminal.refresh()?;
+    let frame = layout.compose(
+        drawables
+            .iter()
+            .map(|d| d as &dyn rust_v2::drawable::Drawable),
+        terminal.width(),
+    );
+    renderer.render_at(&frame, anchor, out)
 }

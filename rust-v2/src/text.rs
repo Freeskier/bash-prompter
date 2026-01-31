@@ -1,4 +1,4 @@
-use crate::drawable::{Display, Drawable, DrawableOptions, Wrap};
+use crate::drawable::{Display, Drawable, Wrap};
 use crate::span::Span;
 use crate::style::Style;
 
@@ -6,7 +6,8 @@ use crate::style::Style;
 pub struct Text {
     text: String,
     display: Display,
-    options: DrawableOptions,
+    style: Style,
+    wrap: Wrap,
 }
 
 impl Text {
@@ -14,7 +15,8 @@ impl Text {
         Self {
             text: text.into(),
             display: Display::Inline,
-            options: DrawableOptions::default(),
+            style: Style::default(),
+            wrap: Wrap::Yes,
         }
     }
 
@@ -23,18 +25,13 @@ impl Text {
         self
     }
 
-    pub fn with_options(mut self, options: DrawableOptions) -> Self {
-        self.options = options;
-        self
-    }
-
     pub fn with_style(mut self, style: Style) -> Self {
-        self.options = self.options.with_style(style);
+        self.style = style;
         self
     }
 
     pub fn with_wrap(mut self, wrap: Wrap) -> Self {
-        self.options = self.options.with_wrap(wrap);
+        self.wrap = wrap;
         self
     }
 
@@ -51,16 +48,12 @@ impl Drawable for Text {
     fn spans(&self) -> Vec<Span> {
         vec![
             Span::new(self.text.clone())
-                .with_style(self.options.style().clone())
-                .with_wrap(self.options.wrap()),
+                .with_style(self.style.clone())
+                .with_wrap(self.wrap),
         ]
     }
 
     fn display(&self) -> Display {
         self.display
-    }
-
-    fn options(&self) -> &DrawableOptions {
-        &self.options
     }
 }

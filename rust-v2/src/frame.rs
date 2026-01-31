@@ -1,13 +1,14 @@
 use crate::span::Span;
+use std::fmt;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Line {
     spans: Vec<Span>,
 }
 
 impl Line {
     pub fn new() -> Self {
-        Self { spans: Vec::new() }
+        Self::default()
     }
 
     pub fn push(&mut self, span: Span) {
@@ -23,24 +24,25 @@ impl Line {
     pub fn width(&self) -> usize {
         self.spans.iter().map(|s| s.width()).sum()
     }
+}
 
-    pub fn to_string(&self) -> String {
-        let mut out = String::new();
+impl fmt::Display for Line {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for span in &self.spans {
-            out.push_str(span.text());
+            write!(f, "{}", span.text())?;
         }
-        out
+        Ok(())
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Frame {
     lines: Vec<Line>,
 }
 
 impl Frame {
     pub fn new() -> Self {
-        Self { lines: Vec::new() }
+        Self::default()
     }
 
     pub fn lines(&self) -> &[Line] {
@@ -74,12 +76,16 @@ impl Frame {
             self.lines.push(Line::new());
         }
     }
+}
 
-    pub fn to_string(&self) -> String {
-        self.lines
-            .iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
+impl fmt::Display for Frame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, line) in self.lines.iter().enumerate() {
+            if i > 0 {
+                writeln!(f)?;
+            }
+            write!(f, "{}", line)?;
+        }
+        Ok(())
     }
 }
