@@ -27,6 +27,10 @@ pub enum Action {
     MoveRight,
     Submit,
     Cancel,
+    NextInput,
+    PrevInput,
+    DeleteWord,        // Ctrl+Backspace - usuwa poprzedni wyraz
+    DeleteWordForward, // Ctrl+Delete - usuwa następny wyraz (opcjonalnie)
 }
 
 /// Typ eventu do filtrowania subskrypcji

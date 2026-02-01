@@ -1,4 +1,5 @@
 use crate::span::Span;
+use crossterm::style::{ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor};
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -29,7 +30,29 @@ impl Line {
 impl fmt::Display for Line {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for span in &self.spans {
+            // Zastosuj style jeśli są
+            if let Some(fg) = span.style().fg() {
+                write!(f, "{}", SetForegroundColor(fg))?;
+            }
+            if let Some(bg) = span.style().bg() {
+                write!(f, "{}", SetBackgroundColor(bg))?;
+            }
+
+            // Zastosuj atrybuty (bold, italic, etc.)
+            for attr in span.style().attributes() {
+                write!(f, "{}", SetAttribute(*attr))?;
+            }
+
+            // Tekst
             write!(f, "{}", span.text())?;
+
+            // Reset stylu
+            if span.style().fg().is_some()
+                || span.style().bg().is_some()
+                || !span.style().attributes().is_empty()
+            {
+                write!(f, "{}", ResetColor)?;
+            }
         }
         Ok(())
     }

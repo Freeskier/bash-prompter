@@ -1,5 +1,6 @@
 use crate::drawable::{Display, Drawable, Wrap};
 use crate::frame::Frame;
+use crate::render_context::RenderContext;
 use crate::span::Span;
 
 #[derive(Clone, Debug, Default)]
@@ -17,7 +18,7 @@ impl Layout {
         self
     }
 
-    pub fn compose<'a, I>(&self, drawables: I, width: u16) -> Frame
+    pub fn compose<'a, I>(&self, drawables: I, width: u16) -> RenderContext
     where
         I: IntoIterator<Item = &'a dyn Drawable>,
     {
@@ -35,6 +36,8 @@ struct LayoutContext {
     frame: Frame,
     width: usize,
     current_width: usize,
+    current_line_index: usize,
+    cursor_position: Option<(u16, usize)>,
 }
 
 impl LayoutContext {
@@ -46,21 +49,34 @@ impl LayoutContext {
             frame,
             width,
             current_width: 0,
+            current_line_index: 0,
+            cursor_position: None,
         }
     }
 
     fn place_drawable(&mut self, drawable: &dyn Drawable) {
+        // Block element zaczyna od nowej linii jeśli coś już jest w obecnej
         if drawable.display() == Display::Block && self.current_width > 0 {
             self.new_line();
         }
+
+        // Sprawdź czy to focused input
+        let cursor_offset = drawable.cursor_offset();
+        let start_col = self.current_width;
 
         for span in drawable.spans() {
             self.place_span(span);
         }
 
-        if drawable.display() == Display::Block && self.current_width > 0 {
-            self.new_line();
+        // Jeśli to focused input, oblicz pozycję kursora
+        if let Some(offset) = cursor_offset {
+            // Kursor jest na pozycji start_col + offset (w znakach unicode)
+            let cursor_col = (start_col + offset) as u16;
+            self.cursor_position = Some((cursor_col, self.current_line_index));
         }
+
+        // Block element NIE kończy automatycznie linii
+        // Następny element (Inline lub Block) sam zdecyduje czy chce być w tej samej linii
     }
 
     fn place_span(&mut self, span: Span) {
@@ -126,14 +142,19 @@ impl LayoutContext {
     fn new_line(&mut self) {
         self.frame.new_line();
         self.current_width = 0;
+        self.current_line_index += 1;
     }
 
     fn available_width(&self) -> usize {
         self.width.saturating_sub(self.current_width)
     }
 
-    fn finish(mut self) -> Frame {
+    fn finish(mut self) -> RenderContext {
         self.frame.trim_trailing_empty();
-        self.frame
+        let mut ctx = RenderContext::new(self.frame);
+        if let Some((col, line)) = self.cursor_position {
+            ctx.set_cursor(col, line);
+        }
+        ctx
     }
 }

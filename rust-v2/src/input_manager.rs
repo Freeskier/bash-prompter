@@ -47,21 +47,24 @@ impl InputManager {
         // Exit
         self.bind(KeyBinding::ctrl(KeyCode::Char('c')), Action::Exit);
 
-        // Navigation - arrows
-        self.bind(KeyBinding::key(KeyCode::Up), Action::MoveUp);
-        self.bind(KeyBinding::key(KeyCode::Down), Action::MoveDown);
-        self.bind(KeyBinding::key(KeyCode::Left), Action::MoveLeft);
-        self.bind(KeyBinding::key(KeyCode::Right), Action::MoveRight);
-
-        // Navigation - vim style
-        self.bind(KeyBinding::key(KeyCode::Char('k')), Action::MoveUp);
-        self.bind(KeyBinding::key(KeyCode::Char('j')), Action::MoveDown);
-        self.bind(KeyBinding::key(KeyCode::Char('h')), Action::MoveLeft);
-        self.bind(KeyBinding::key(KeyCode::Char('l')), Action::MoveRight);
+        // NOTE: Strzałki NIE są bindowane globalnie - obsługuje je każdy input lokalnie
+        // To pozwala IpInput używać Up/Down do zmiany wartości, TextInput do nawigacji etc.
 
         // Actions
         self.bind(KeyBinding::key(KeyCode::Enter), Action::Submit);
         self.bind(KeyBinding::key(KeyCode::Esc), Action::Cancel);
+
+        // Input navigation
+        self.bind(KeyBinding::key(KeyCode::Tab), Action::NextInput);
+        self.bind(
+            KeyBinding::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+            Action::PrevInput,
+        );
+
+        // Text editing
+        self.bind(KeyBinding::ctrl(KeyCode::Backspace), Action::DeleteWord);
+        self.bind(KeyBinding::ctrl(KeyCode::Char('w')), Action::DeleteWord); // Alternatywny binding (jak w Bash)
+        self.bind(KeyBinding::ctrl(KeyCode::Delete), Action::DeleteWordForward);
     }
 
     pub fn bind(&mut self, key: KeyBinding, action: Action) {
@@ -70,6 +73,12 @@ impl InputManager {
 
     pub fn unbind(&mut self, key: &KeyBinding) {
         self.bindings.remove(key);
+    }
+
+    /// Przetwarza event z crossterm i zwraca akcję (jeśli znaleziono binding)
+    pub fn handle_key(&self, key_event: &KeyEvent) -> Option<Action> {
+        let binding = KeyBinding::from_key_event(key_event);
+        self.bindings.get(&binding).copied()
     }
 
     /// Przetwarza event z crossterm i emituje odpowiednie AppEventy

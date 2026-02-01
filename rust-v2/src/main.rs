@@ -1,17 +1,22 @@
 use crossterm::event::{self, poll};
 use crossterm::{cursor, execute, terminal};
-use rust_v2::drawable::{Display, Wrap};
-use rust_v2::event::{Action, AppEvent, EventType};
-use rust_v2::event_emitter::EventEmitter;
+use rust_v2::drawable::Display;
+use rust_v2::event::Action;
+use rust_v2::form_item::FormItem;
+use rust_v2::form_state::FormState;
+use rust_v2::input::ip_input::ip_input;
+use rust_v2::input::text_input::text_input;
+use rust_v2::input::validators::{min_length, required};
 use rust_v2::input_manager::InputManager;
 use rust_v2::layout::Layout;
 use rust_v2::renderer::Renderer;
 use rust_v2::terminal_state::TerminalState;
 use rust_v2::text::Text;
-use std::cell::RefCell;
 use std::io::{self, Write};
-use std::rc::Rc;
 use std::time::Duration;
+
+// NOTE: EventEmitter obecnie nie jest używany w prostych formularzach,
+// ale jest dostępny dla zaawansowanych przypadków (pluginy, external listeners)
 
 fn main() {
     if let Err(e) = run() {
@@ -27,133 +32,194 @@ fn run() -> io::Result<()> {
 
     let result = event_loop(&mut stdout);
 
-    // Cleanup
+    // Cleanup - przesuń kursor na koniec zawartości
+    if let Ok((ref renderer, ref context)) = result {
+        let _ = renderer.move_to_end(context, &mut stdout);
+    }
     execute!(stdout, cursor::MoveToNextLine(1))?;
     execute!(stdout, terminal::EnableLineWrap)?;
     terminal::disable_raw_mode()?;
 
-    result
+    result.map(|_| ())
 }
 
-fn event_loop(stdout: &mut io::Stdout) -> io::Result<()> {
+fn event_loop(
+    stdout: &mut io::Stdout,
+) -> io::Result<(Renderer, rust_v2::render_context::RenderContext)> {
     let mut terminal = TerminalState::new()?;
     let layout = Layout::new();
     let mut renderer = Renderer::new();
     let input_manager = InputManager::new();
-    let mut emitter = EventEmitter::new();
 
-    let drawables = vec![
-        Text::new("Tutaj pisze testowy tekst Tutaj pisze testowy tekst Tutaj pisze testowy tekst ")
-            .with_display(Display::Inline),
-        Text::new("[DATE]")
-            .with_display(Display::Inline)
-            .with_wrap(Wrap::No),
-        Text::new(" tutaj dalej tekst").with_display(Display::Inline),
-        Text::new("Nastepna linia blokowa.").with_display(Display::Block),
+    // Tworzenie formularza
+    let items = vec![
+        FormItem::from(Text::new("Please fill the form:").with_display(Display::Block)),
+        FormItem::from(
+            text_input("Username")
+                .with_min_width(20)
+                .with_validation(required())
+                .with_validation(min_length(3)),
+        ),
+        FormItem::from(Text::new("Email address:").with_display(Display::Inline)),
+        FormItem::from(
+            text_input("Email")
+                .with_min_width(30)
+                .with_validation(required()),
+        ),
+        FormItem::from(ip_input("Server IP").with_default([192, 168, 1, 1])),
+        FormItem::from(
+            text_input("Password")
+                .with_min_width(20)
+                .with_validation(required())
+                .with_validation(min_length(8)),
+        ),
     ];
 
-    // Stan współdzielony przez handlery
-    let should_exit = Rc::new(RefCell::new(false));
-    let needs_rerender = Rc::new(RefCell::new(false));
-
-    // Subskrypcja na Exit
-    {
-        let should_exit = Rc::clone(&should_exit);
-        emitter.on(EventType::Action, move |event| {
-            if let AppEvent::Action(Action::Exit) = event {
-                *should_exit.borrow_mut() = true;
-            }
-        });
-    }
-
-    // Subskrypcja na Resize
-    {
-        let needs_rerender = Rc::clone(&needs_rerender);
-        emitter.on(EventType::Resize, move |_| {
-            *needs_rerender.borrow_mut() = true;
-        });
-    }
+    let mut form = FormState::new(items);
 
     // Początkowy render
-    render(&layout, &drawables, &mut terminal, &mut renderer, stdout)?;
+    let mut last_context = render_form(&layout, &form, &mut terminal, &mut renderer, stdout)?;
 
     loop {
-        if *should_exit.borrow() {
-            break;
+        // Aktualizuj timery errorów
+        if form.update_error_timers() {
+            last_context = render_form(&layout, &form, &mut terminal, &mut renderer, stdout)?;
         }
 
         if !poll(Duration::from_millis(100))? {
-            // Sprawdź czy anchor się zmienił (np. przez scroll)
-            if let Some(prev_anchor) = renderer.anchor_row() {
-                let (_, current_row) = cursor::position()?;
-                if current_row != prev_anchor {
-                    render_at(
-                        &layout,
-                        &drawables,
-                        &mut terminal,
-                        &mut renderer,
-                        stdout,
-                        current_row,
-                    )?;
-                }
-            }
             continue;
         }
 
-        // Przetwórz event przez InputManager
+        // Odczytaj event
         let raw_event = event::read()?;
-        input_manager.process(raw_event, &mut emitter);
 
-        // Sprawdź czy potrzebny rerender (np. po resize)
-        if *needs_rerender.borrow() {
-            *needs_rerender.borrow_mut() = false;
-            terminal.refresh()?;
-            let (_, row) = cursor::position()?;
-            render_at(
-                &layout,
-                &drawables,
-                &mut terminal,
-                &mut renderer,
-                stdout,
-                row,
-            )?;
+        // Obsłuż eventy
+        match raw_event {
+            crossterm::event::Event::Key(key_event) => {
+                // Sprawdź czy InputManager ma binding dla tego klawisza
+                if let Some(action) = input_manager.handle_key(&key_event) {
+                    let needs_render = handle_action(action, &mut form);
+
+                    if action == Action::Exit {
+                        break;
+                    }
+
+                    if needs_render {
+                        last_context =
+                            render_form(&layout, &form, &mut terminal, &mut renderer, stdout)?;
+                    }
+                } else {
+                    // Nie ma akcji - przekaż do inputa
+                    if let Some(input) =
+                        form.focused_item_mut().and_then(|item| item.as_input_mut())
+                    {
+                        if input.handle_key(key_event.code, key_event.modifiers) {
+                            last_context =
+                                render_form(&layout, &form, &mut terminal, &mut renderer, stdout)?;
+                        }
+                    }
+                }
+            }
+
+            crossterm::event::Event::Resize(_, _) => {
+                terminal.refresh()?;
+                let (_, row) = cursor::position()?;
+                last_context =
+                    render_form_at(&layout, &form, &mut terminal, &mut renderer, stdout, row)?;
+            }
+
+            _ => {}
         }
     }
 
-    Ok(())
+    Ok((renderer, last_context))
 }
 
-fn render(
+/// Obsługuje akcje z InputManagera
+/// Zwraca true jeśli potrzebny re-render
+fn handle_action(action: Action, form: &mut FormState) -> bool {
+    match action {
+        Action::Exit => false,
+
+        Action::NextInput => {
+            form.focus_next();
+            true
+        }
+
+        Action::PrevInput => {
+            form.focus_prev();
+            true
+        }
+
+        Action::Submit => {
+            if let Some(input) = form.focused_item_mut().and_then(|item| item.as_input_mut()) {
+                if input.validate().is_ok() {
+                    form.try_next();
+                } else {
+                    input.show_error();
+                }
+                true
+            } else {
+                false
+            }
+        }
+
+        Action::DeleteWord => {
+            if let Some(input) = form.focused_item_mut().and_then(|item| item.as_input_mut()) {
+                input.delete_word();
+                true
+            } else {
+                false
+            }
+        }
+
+        Action::DeleteWordForward => {
+            if let Some(input) = form.focused_item_mut().and_then(|item| item.as_input_mut()) {
+                input.delete_word_forward();
+                true
+            } else {
+                false
+            }
+        }
+
+        _ => false,
+    }
+}
+
+// Helper do renderowania formularza
+fn render_form(
     layout: &Layout,
-    drawables: &[Text],
+    form: &FormState,
     terminal: &mut TerminalState,
     renderer: &mut Renderer,
     out: &mut impl Write,
-) -> io::Result<()> {
+) -> io::Result<rust_v2::render_context::RenderContext> {
     terminal.refresh()?;
-    let frame = layout.compose(
-        drawables
-            .iter()
-            .map(|d| d as &dyn rust_v2::drawable::Drawable),
-        terminal.width(),
-    );
-    renderer.render(&frame, out)
+    let drawables: Vec<&dyn rust_v2::drawable::Drawable> = form
+        .items()
+        .iter()
+        .map(|item| item as &dyn rust_v2::drawable::Drawable)
+        .collect();
+    let context = layout.compose(drawables, terminal.width());
+    renderer.render(&context, out)?;
+    Ok(context)
 }
 
-fn render_at(
+fn render_form_at(
     layout: &Layout,
-    drawables: &[Text],
+    form: &FormState,
     terminal: &mut TerminalState,
     renderer: &mut Renderer,
     out: &mut impl Write,
     anchor: u16,
-) -> io::Result<()> {
+) -> io::Result<rust_v2::render_context::RenderContext> {
     terminal.refresh()?;
-    let frame = layout.compose(
-        drawables
-            .iter()
-            .map(|d| d as &dyn rust_v2::drawable::Drawable),
-        terminal.width(),
-    );
-    renderer.render_at(&frame, anchor, out)
+    let drawables: Vec<&dyn rust_v2::drawable::Drawable> = form
+        .items()
+        .iter()
+        .map(|item| item as &dyn rust_v2::drawable::Drawable)
+        .collect();
+    let context = layout.compose(drawables, terminal.width());
+    renderer.render_at(&context, anchor, out)?;
+    Ok(context)
 }
