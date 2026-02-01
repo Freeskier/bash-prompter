@@ -1,4 +1,4 @@
-use crate::drawable::Wrap;
+use crate::node::Wrap;
 use crate::style::Style;
 use unicode_width::UnicodeWidthStr;
 

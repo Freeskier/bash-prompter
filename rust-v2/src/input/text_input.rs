@@ -1,214 +1,258 @@
-use crate::input::InputContent;
-use crate::input::base::Input;
-use crossterm::event::{KeyCode, KeyModifiers};
-use unicode_width::UnicodeWidthStr;
+use crate::node::{Display, Node, NodeId, NodeKind, Options, Wrap};
+use crate::validators::Validator;
+use crossterm::style::Color;
 
-/// Zawartość tekstowego inputa
-pub struct TextInputContent {
-    value: String,
-    cursor_pos: usize,
-    min_width: usize,
+/// Base input node - shared by all input types
+pub struct InputNode {
+    pub id: NodeId,
+    pub label: String,
+    pub value: String,
+    pub cursor_pos: usize, // Position in characters (not bytes)
+    pub validators: Vec<Validator>,
+    pub error: Option<String>,
+    pub min_width: usize,
 }
 
-impl TextInputContent {
-    pub fn new() -> Self {
+impl InputNode {
+    pub fn new(id: impl Into<NodeId>, label: impl Into<String>) -> Self {
         Self {
+            id: id.into(),
+            label: label.into(),
             value: String::new(),
             cursor_pos: 0,
-            min_width: 20,
+            validators: Vec::new(),
+            error: None,
+            min_width: 10,
         }
     }
 
-    pub fn with_min_width(mut self, width: usize) -> Self {
-        self.min_width = width;
-        self
+    /// Get cursor position clamped to valid range
+    fn clamp_cursor(&self) -> usize {
+        self.cursor_pos.min(self.value.chars().count())
     }
-}
 
-impl Default for TextInputContent {
-    fn default() -> Self {
-        Self::new()
+    pub fn validate(&self) -> Result<(), String> {
+        for validator in &self.validators {
+            validator(&self.value)?;
+        }
+        Ok(())
     }
-}
 
-impl InputContent for TextInputContent {
-    fn render_value(&self) -> String {
-        let mut result = self.value.clone();
+    /// Insert text at cursor position
+    pub fn insert_text(&mut self, text: &str) {
+        let mut chars: Vec<char> = self.value.chars().collect();
+        let pos = self.clamp_cursor();
 
-        // Padding do min_width
-        let current_width = result.width();
-        let padding_needed = self.min_width.saturating_sub(current_width);
-        for _ in 0..padding_needed {
-            result.push(' ');
+        // Insert text at cursor position
+        for (i, ch) in text.chars().enumerate() {
+            chars.insert(pos + i, ch);
         }
 
-        result
+        self.value = chars.into_iter().collect();
+        self.cursor_pos = pos + text.chars().count();
     }
 
-    fn cursor_position(&self) -> usize {
-        self.cursor_pos
-    }
-
-    fn value(&self) -> &str {
-        &self.value
-    }
-
-    fn set_value(&mut self, value: String) {
-        self.cursor_pos = value.chars().count();
-        self.value = value;
-    }
-
-    fn handle_char(&mut self, ch: char) {
-        let chars: Vec<char> = self.value.chars().collect();
-        let mut new_value = String::new();
-
-        for (i, c) in chars.iter().enumerate() {
-            if i == self.cursor_pos {
-                new_value.push(ch);
-            }
-            new_value.push(*c);
-        }
-
-        if self.cursor_pos >= chars.len() {
-            new_value.push(ch);
-        }
-
-        self.value = new_value;
-        self.cursor_pos += 1;
-    }
-
-    fn handle_backspace(&mut self) {
-        if self.cursor_pos > 0 {
-            let chars: Vec<char> = self.value.chars().collect();
-            self.value = chars
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| *i != self.cursor_pos - 1)
-                .map(|(_, c)| c)
-                .collect();
-            self.cursor_pos -= 1;
-        }
-    }
-
-    fn delete_word(&mut self) {
+    /// Delete character before cursor (backspace)
+    pub fn delete_char(&mut self) -> bool {
         if self.cursor_pos == 0 {
-            return;
+            return false;
         }
 
-        let chars: Vec<char> = self.value.chars().collect();
+        let mut chars: Vec<char> = self.value.chars().collect();
+        let pos = self.clamp_cursor();
 
-        // Znajdź początek poprzedniego wyrazu
-        // 1. Pomiń whitespace za kursorem (w lewo)
-        let mut pos = self.cursor_pos;
-        while pos > 0 && chars[pos - 1].is_whitespace() {
+        if pos > 0 {
+            chars.remove(pos - 1);
+            self.value = chars.into_iter().collect();
+            self.cursor_pos = pos - 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Delete character at cursor (delete key)
+    pub fn delete_char_forward(&mut self) -> bool {
+        let mut chars: Vec<char> = self.value.chars().collect();
+        let pos = self.clamp_cursor();
+
+        if pos < chars.len() {
+            chars.remove(pos);
+            self.value = chars.into_iter().collect();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Delete word before cursor (Ctrl+Backspace)
+    pub fn delete_word(&mut self) -> bool {
+        if self.cursor_pos == 0 {
+            return false;
+        }
+
+        let mut chars: Vec<char> = self.value.chars().collect();
+        let mut pos = self.clamp_cursor();
+
+        // Remove trailing whitespace first
+        while pos > 0 && chars.get(pos - 1).is_some_and(|c| c.is_whitespace()) {
+            chars.remove(pos - 1);
             pos -= 1;
         }
 
-        // 2. Pomiń non-whitespace (właściwy wyraz)
-        while pos > 0 && !chars[pos - 1].is_whitespace() {
+        // Remove word characters
+        while pos > 0 && chars.get(pos - 1).is_some_and(|c| !c.is_whitespace()) {
+            chars.remove(pos - 1);
             pos -= 1;
         }
 
-        // Usuń od `pos` do `cursor_pos`
-        let new_value: String = chars
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i < pos || *i >= self.cursor_pos)
-            .map(|(_, c)| c)
-            .collect();
-
-        self.value = new_value;
+        self.value = chars.into_iter().collect();
         self.cursor_pos = pos;
+        true
     }
 
-    fn delete_word_forward(&mut self) {
-        let chars: Vec<char> = self.value.chars().collect();
-        if self.cursor_pos >= chars.len() {
-            return;
+    /// Move cursor left
+    pub fn move_cursor_left(&mut self) -> bool {
+        if self.cursor_pos > 0 {
+            self.cursor_pos -= 1;
+            true
+        } else {
+            false
         }
-
-        // Znajdź koniec następnego wyrazu
-        // 1. Pomiń whitespace przed kursorem (w prawo)
-        let mut pos = self.cursor_pos;
-        while pos < chars.len() && chars[pos].is_whitespace() {
-            pos += 1;
-        }
-
-        // 2. Pomiń non-whitespace (właściwy wyraz)
-        while pos < chars.len() && !chars[pos].is_whitespace() {
-            pos += 1;
-        }
-
-        // Usuń od `cursor_pos` do `pos`
-        let new_value: String = chars
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i < self.cursor_pos || *i >= pos)
-            .map(|(_, c)| c)
-            .collect();
-
-        self.value = new_value;
-        // cursor_pos pozostaje bez zmian
     }
 
-    fn handle_key(&mut self, code: KeyCode, _modifiers: KeyModifiers) -> bool {
-        match code {
-            KeyCode::Char(ch) => {
-                self.handle_char(ch);
-                true
-            }
-            KeyCode::Backspace => {
-                self.handle_backspace();
-                true
-            }
-            KeyCode::Delete => {
-                if self.cursor_pos < self.value.chars().count() {
-                    let chars: Vec<char> = self.value.chars().collect();
-                    self.value = chars
-                        .iter()
-                        .enumerate()
-                        .filter(|(i, _)| *i != self.cursor_pos)
-                        .map(|(_, c)| c)
-                        .collect();
-                }
-                true
-            }
-            KeyCode::Left => {
-                if self.cursor_pos > 0 {
-                    self.cursor_pos -= 1;
-                }
-                true
-            }
-            KeyCode::Right => {
-                if self.cursor_pos < self.value.chars().count() {
-                    self.cursor_pos += 1;
-                }
-                true
-            }
-            KeyCode::Home => {
-                self.cursor_pos = 0;
-                true
-            }
-            KeyCode::End => {
-                self.cursor_pos = self.value.chars().count();
-                true
-            }
-            _ => false,
+    /// Move cursor right
+    pub fn move_cursor_right(&mut self) -> bool {
+        let max_pos = self.value.chars().count();
+        if self.cursor_pos < max_pos {
+            self.cursor_pos += 1;
+            true
+        } else {
+            false
         }
+    }
+
+    /// Move cursor to start
+    pub fn move_cursor_home(&mut self) -> bool {
+        if self.cursor_pos > 0 {
+            self.cursor_pos = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move cursor to end
+    pub fn move_cursor_end(&mut self) -> bool {
+        let max_pos = self.value.chars().count();
+        if self.cursor_pos < max_pos {
+            self.cursor_pos = max_pos;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Clear all text
+    pub fn clear(&mut self) {
+        self.value.clear();
+        self.cursor_pos = 0;
     }
 }
 
-/// Tekstowy input - bazowy Input z TextInputContent
-pub type TextInput = Input<TextInputContent>;
-
-// Pomocnicze metody dla TextInput
-pub fn text_input(label: impl Into<String>) -> TextInput {
-    Input::new(label, TextInputContent::new())
+/// Text input node - single line text input
+pub struct TextInputNode {
+    pub input: InputNode,
 }
 
-impl TextInput {
-    pub fn with_min_width(mut self, width: usize) -> Self {
-        self.content_mut().min_width = width;
+/// Builder for TextInput node
+pub struct TextInputBuilder {
+    input: InputNode,
+    opts: Options,
+}
+
+impl TextInputBuilder {
+    pub fn new(id: NodeId, label: String) -> Self {
+        Self {
+            input: InputNode::new(id, label),
+            opts: Options::default(),
+        }
+    }
+
+    // Validation methods
+
+    pub fn required(self) -> Self {
+        self.validator(crate::validators::required())
+    }
+
+    pub fn min_length(self, len: usize) -> Self {
+        self.validator(crate::validators::min_length(len))
+    }
+
+    pub fn max_length(self, len: usize) -> Self {
+        self.validator(crate::validators::max_length(len))
+    }
+
+    pub fn min_width(mut self, width: usize) -> Self {
+        self.input.min_width = width;
         self
+    }
+
+    pub fn validator(mut self, validator: Validator) -> Self {
+        self.input.validators.push(validator);
+        self
+    }
+
+    // Display options
+
+    pub fn with_display(mut self, display: Display) -> Self {
+        self.opts.display = display;
+        self
+    }
+
+    pub fn with_wrap(mut self, wrap: Wrap) -> Self {
+        self.opts.wrap = wrap;
+        self
+    }
+
+    pub fn with_color(mut self, color: Color) -> Self {
+        self.opts.color = Some(color);
+        self
+    }
+
+    pub fn with_background(mut self, bg: Color) -> Self {
+        self.opts.background = Some(bg);
+        self
+    }
+
+    pub fn bold(mut self) -> Self {
+        self.opts.bold = true;
+        self
+    }
+
+    pub fn italic(mut self) -> Self {
+        self.opts.italic = true;
+        self
+    }
+
+    pub fn underline(mut self) -> Self {
+        self.opts.underline = true;
+        self
+    }
+
+    // Build
+
+    pub fn build(self) -> Node {
+        Node {
+            opts: self.opts,
+            kind: NodeKind::TextInput(TextInputNode { input: self.input }),
+        }
+    }
+}
+
+// Auto-build when used in Vec<Node>
+impl From<TextInputBuilder> for Node {
+    fn from(builder: TextInputBuilder) -> Self {
+        builder.build()
     }
 }

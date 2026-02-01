@@ -1,22 +1,18 @@
 use crossterm::event::{self, poll};
 use crossterm::{cursor, execute, terminal};
-use rust_v2::drawable::Display;
+use rust_v2::app_state::AppState;
 use rust_v2::event::Action;
-use rust_v2::form_item::FormItem;
-use rust_v2::form_state::FormState;
-use rust_v2::input::ip_input::ip_input;
-use rust_v2::input::text_input::text_input;
-use rust_v2::input::validators::{min_length, required};
 use rust_v2::input_manager::InputManager;
 use rust_v2::layout::Layout;
+use rust_v2::node::Node;
+use rust_v2::node::{Display, NodeId};
+use rust_v2::render_context::RenderContext;
 use rust_v2::renderer::Renderer;
+use rust_v2::step::{Step, StepExt};
 use rust_v2::terminal_state::TerminalState;
-use rust_v2::text::Text;
-use std::io::{self, Write};
-use std::time::Duration;
-
-// NOTE: EventEmitter obecnie nie jest używany w prostych formularzach,
-// ale jest dostępny dla zaawansowanych przypadków (pluginy, external listeners)
+use rust_v2::validators;
+use std::io;
+use std::time::{Duration, Instant};
 
 fn main() {
     if let Err(e) = run() {
@@ -32,194 +28,257 @@ fn run() -> io::Result<()> {
 
     let result = event_loop(&mut stdout);
 
-    // Cleanup - przesuń kursor na koniec zawartości
-    if let Ok((ref renderer, ref context)) = result {
-        let _ = renderer.move_to_end(context, &mut stdout);
+    // Cleanup
+    if let Ok((renderer, frame_lines)) = result {
+        let _ = renderer.move_to_end(frame_lines, &mut stdout);
+        execute!(stdout, cursor::MoveToNextLine(1))?;
     }
-    execute!(stdout, cursor::MoveToNextLine(1))?;
     execute!(stdout, terminal::EnableLineWrap)?;
     terminal::disable_raw_mode()?;
 
-    result.map(|_| ())
+    Ok(())
 }
 
-fn event_loop(
-    stdout: &mut io::Stdout,
-) -> io::Result<(Renderer, rust_v2::render_context::RenderContext)> {
+fn event_loop(stdout: &mut io::Stdout) -> io::Result<(Renderer, usize)> {
     let mut terminal = TerminalState::new()?;
     let layout = Layout::new();
     let mut renderer = Renderer::new();
     let input_manager = InputManager::new();
 
-    // Tworzenie formularza
-    let items = vec![
-        FormItem::from(Text::new("Please fill the form:").with_display(Display::Block)),
-        FormItem::from(
-            text_input("Username")
-                .with_min_width(20)
-                .with_validation(required())
-                .with_validation(min_length(3)),
-        ),
-        FormItem::from(Text::new("Email address:").with_display(Display::Inline)),
-        FormItem::from(
-            text_input("Email")
-                .with_min_width(30)
-                .with_validation(required()),
-        ),
-        FormItem::from(ip_input("Server IP").with_default([192, 168, 1, 1])),
-        FormItem::from(
-            text_input("Password")
-                .with_min_width(20)
-                .with_validation(required())
-                .with_validation(min_length(8)),
-        ),
+    // Track errors with timeout (input_id -> set_time)
+    let mut error_timeouts: std::collections::HashMap<NodeId, Instant> =
+        std::collections::HashMap::new();
+    const ERROR_TIMEOUT: Duration = Duration::from_secs(2);
+
+    // Build the step (form)
+    let mut step: Step = vec![
+        Node::text("Please fill the form:"),
+        Node::text_input("username", "Username")
+            .required()
+            .min_length(3)
+            .validator(validators::alphanumeric())
+            .build(),
+        Node::text("Email address:").with_display(Display::Inline),
+        Node::text_input("email", "Email")
+            .required()
+            .min_width(30)
+            .validator(validators::email())
+            .build(),
+        Node::text_input("password", "Password")
+            .required()
+            .min_length(8)
+            .min_width(20)
+            .build(),
+        Node::text("Koniec"),
     ];
 
-    let mut form = FormState::new(items);
+    // Initialize app state from step
+    let mut state = AppState::from_step(&step);
 
-    // Początkowy render
-    let mut last_context = render_form(&layout, &form, &mut terminal, &mut renderer, stdout)?;
+    // Initial render
+    let mut last_frame_lines =
+        render_step(&mut renderer, &step, &layout, &mut terminal, &state, stdout)?;
 
     loop {
-        // Aktualizuj timery errorów
-        if form.update_error_timers() {
-            last_context = render_form(&layout, &form, &mut terminal, &mut renderer, stdout)?;
+        // Check for expired error timeouts
+        let now = Instant::now();
+        let expired: Vec<NodeId> = error_timeouts
+            .iter()
+            .filter(|(_, set_time)| now.duration_since(**set_time) >= ERROR_TIMEOUT)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        let mut needs_rerender_from_timeout = false;
+        for id in expired {
+            step.clear_error(&id);
+            error_timeouts.remove(&id);
+            needs_rerender_from_timeout = true;
+        }
+
+        if needs_rerender_from_timeout {
+            last_frame_lines =
+                render_step(&mut renderer, &step, &layout, &mut terminal, &state, stdout)?;
         }
 
         if !poll(Duration::from_millis(100))? {
             continue;
         }
 
-        // Odczytaj event
+        // Read event
         let raw_event = event::read()?;
 
-        // Obsłuż eventy
+        // Handle keyboard events
         match raw_event {
             crossterm::event::Event::Key(key_event) => {
-                // Sprawdź czy InputManager ma binding dla tego klawisza
+                // Check if InputManager has a binding
                 if let Some(action) = input_manager.handle_key(&key_event) {
-                    let needs_render = handle_action(action, &mut form);
+                    let needs_render =
+                        handle_action(action, &mut step, &mut state, &mut error_timeouts);
 
                     if action == Action::Exit {
                         break;
                     }
 
                     if needs_render {
-                        last_context =
-                            render_form(&layout, &form, &mut terminal, &mut renderer, stdout)?;
+                        last_frame_lines = render_step(
+                            &mut renderer,
+                            &step,
+                            &layout,
+                            &mut terminal,
+                            &state,
+                            stdout,
+                        )?;
                     }
                 } else {
-                    // Nie ma akcji - przekaż do inputa
-                    if let Some(input) =
-                        form.focused_item_mut().and_then(|item| item.as_input_mut())
-                    {
-                        if input.handle_key(key_event.code, key_event.modifiers) {
-                            last_context =
-                                render_form(&layout, &form, &mut terminal, &mut renderer, stdout)?;
+                    // No action binding - handle as text input
+                    if let crossterm::event::Event::Key(ke) = raw_event
+                        && let Some(focused_id) = state.focused() {
+                            // Debug: uncomment to see what keys send
+                            // eprintln!("Key: {:?}, Modifiers: {:?}", ke.code, ke.modifiers);
+
+                            let handled = match ke.code {
+                                crossterm::event::KeyCode::Char(ch) => {
+                                    // Only handle regular characters (no Ctrl combinations)
+                                    // Ctrl combinations are handled by InputManager
+                                    if !ke
+                                        .modifiers
+                                        .contains(crossterm::event::KeyModifiers::CONTROL)
+                                    {
+                                        step.insert_text(focused_id, &ch.to_string())
+                                    } else {
+                                        false
+                                    }
+                                }
+                                crossterm::event::KeyCode::Backspace => {
+                                    // Regular backspace - delete char
+                                    // Ctrl+Backspace is handled by InputManager
+                                    if !ke
+                                        .modifiers
+                                        .contains(crossterm::event::KeyModifiers::CONTROL)
+                                    {
+                                        step.delete_char(focused_id)
+                                    } else {
+                                        false
+                                    }
+                                }
+                                crossterm::event::KeyCode::Delete => {
+                                    // Delete character forward
+                                    step.delete_char_forward(focused_id)
+                                }
+                                crossterm::event::KeyCode::Left => {
+                                    // Move cursor left
+                                    step.move_cursor_left(focused_id)
+                                }
+                                crossterm::event::KeyCode::Right => {
+                                    // Move cursor right
+                                    step.move_cursor_right(focused_id)
+                                }
+                                crossterm::event::KeyCode::Home => {
+                                    // Move cursor to start
+                                    step.move_cursor_home(focused_id)
+                                }
+                                crossterm::event::KeyCode::End => {
+                                    // Move cursor to end
+                                    step.move_cursor_end(focused_id)
+                                }
+                                _ => false,
+                            };
+
+                            if handled {
+                                last_frame_lines = render_step(
+                                    &mut renderer,
+                                    &step,
+                                    &layout,
+                                    &mut terminal,
+                                    &state,
+                                    stdout,
+                                )?;
+                            }
                         }
-                    }
                 }
             }
 
             crossterm::event::Event::Resize(_, _) => {
-                terminal.refresh()?;
-                let (_, row) = cursor::position()?;
-                last_context =
-                    render_form_at(&layout, &form, &mut terminal, &mut renderer, stdout, row)?;
+                last_frame_lines =
+                    render_step(&mut renderer, &step, &layout, &mut terminal, &state, stdout)?;
             }
 
             _ => {}
         }
     }
 
-    Ok((renderer, last_context))
+    Ok((renderer, last_frame_lines))
 }
 
-/// Obsługuje akcje z InputManagera
-/// Zwraca true jeśli potrzebny re-render
-fn handle_action(action: Action, form: &mut FormState) -> bool {
+/// Render the step and return the number of lines rendered
+fn render_step(
+    renderer: &mut Renderer,
+    step: &Step,
+    layout: &Layout,
+    terminal: &mut TerminalState,
+    state: &AppState,
+    stdout: &mut io::Stdout,
+) -> io::Result<usize> {
+    terminal.refresh()?;
+    let placed = layout.layout(step, terminal.width());
+    let ctx = RenderContext::new(state.focused());
+    renderer.render(step, &placed, &ctx, stdout)?;
+    Ok(placed.iter().map(|p| p.y).max().unwrap_or(0) + 1)
+}
+
+/// Handle actions from InputManager
+fn handle_action(
+    action: Action,
+    step: &mut Step,
+    state: &mut AppState,
+    error_timeouts: &mut std::collections::HashMap<NodeId, Instant>,
+) -> bool {
     match action {
         Action::Exit => false,
 
         Action::NextInput => {
-            form.focus_next();
+            state.focus_next();
             true
         }
 
         Action::PrevInput => {
-            form.focus_prev();
+            state.focus_prev();
             true
         }
 
         Action::Submit => {
-            if let Some(input) = form.focused_item_mut().and_then(|item| item.as_input_mut()) {
-                if input.validate().is_ok() {
-                    form.try_next();
-                } else {
-                    input.show_error();
+            // Validate current input
+            if let Some(focused_id) = state.focused() {
+                match step.validate_input(focused_id) {
+                    Ok(()) => {
+                        // Valid - clear error and move to next input
+                        step.clear_error(focused_id);
+                        error_timeouts.remove(focused_id);
+                        state.focus_next();
+                    }
+                    Err(err) => {
+                        // Invalid - set error and record timestamp for auto-clear
+                        step.set_error(focused_id, err);
+                        error_timeouts.insert(focused_id.clone(), Instant::now());
+                    }
                 }
-                true
-            } else {
-                false
             }
+            true
         }
 
         Action::DeleteWord => {
-            if let Some(input) = form.focused_item_mut().and_then(|item| item.as_input_mut()) {
-                input.delete_word();
-                true
+            // Delete previous word in focused input
+            if let Some(focused_id) = state.focused() {
+                step.delete_word(focused_id)
             } else {
                 false
             }
         }
 
         Action::DeleteWordForward => {
-            if let Some(input) = form.focused_item_mut().and_then(|item| item.as_input_mut()) {
-                input.delete_word_forward();
-                true
-            } else {
-                false
-            }
+            // TODO: implement delete word forward (Ctrl+Delete)
+            // For now, just return false
+            false
         }
-
-        _ => false,
     }
-}
-
-// Helper do renderowania formularza
-fn render_form(
-    layout: &Layout,
-    form: &FormState,
-    terminal: &mut TerminalState,
-    renderer: &mut Renderer,
-    out: &mut impl Write,
-) -> io::Result<rust_v2::render_context::RenderContext> {
-    terminal.refresh()?;
-    let drawables: Vec<&dyn rust_v2::drawable::Drawable> = form
-        .items()
-        .iter()
-        .map(|item| item as &dyn rust_v2::drawable::Drawable)
-        .collect();
-    let context = layout.compose(drawables, terminal.width());
-    renderer.render(&context, out)?;
-    Ok(context)
-}
-
-fn render_form_at(
-    layout: &Layout,
-    form: &FormState,
-    terminal: &mut TerminalState,
-    renderer: &mut Renderer,
-    out: &mut impl Write,
-    anchor: u16,
-) -> io::Result<rust_v2::render_context::RenderContext> {
-    terminal.refresh()?;
-    let drawables: Vec<&dyn rust_v2::drawable::Drawable> = form
-        .items()
-        .iter()
-        .map(|item| item as &dyn rust_v2::drawable::Drawable)
-        .collect();
-    let context = layout.compose(drawables, terminal.width());
-    renderer.render_at(&context, anchor, out)?;
-    Ok(context)
 }

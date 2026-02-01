@@ -1,9 +1,20 @@
-use crate::drawable::{Display, Drawable, Wrap};
-use crate::frame::Frame;
-use crate::render_context::RenderContext;
-use crate::span::Span;
+use crate::node::{Display, Wrap};
+use crate::node::{Node, NodeKind};
+use unicode_width::UnicodeWidthStr;
 
-#[derive(Clone, Debug, Default)]
+/// Positioned node - contains the index and position for a node
+#[derive(Debug, Clone)]
+pub struct Placed {
+    /// Index in the Step (Vec<Node>)
+    pub index: usize,
+    /// X position (column)
+    pub x: usize,
+    /// Y position (row/line)
+    pub y: usize,
+}
+
+/// Layout engine - converts Step (&[Node]) into positioned nodes (Vec<Placed>)
+#[derive(Debug, Clone)]
 pub struct Layout {
     margin: usize,
 }
@@ -18,143 +29,134 @@ impl Layout {
         self
     }
 
-    pub fn compose<'a, I>(&self, drawables: I, width: u16) -> RenderContext
-    where
-        I: IntoIterator<Item = &'a dyn Drawable>,
-    {
-        let mut ctx = LayoutContext::new(width as usize, self.margin);
+    /// Layout nodes and return their positions
+    pub fn layout(&self, nodes: &[Node], width: u16) -> Vec<Placed> {
+        let effective_width = (width as usize).saturating_sub(self.margin);
+        let mut engine = LayoutEngine::new(effective_width);
 
-        for drawable in drawables {
-            ctx.place_drawable(drawable);
+        for (index, node) in nodes.iter().enumerate() {
+            engine.place_node(index, node);
         }
 
-        ctx.finish()
+        engine.finish()
     }
 }
 
-struct LayoutContext {
-    frame: Frame,
+impl Default for Layout {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Internal layout engine
+struct LayoutEngine {
     width: usize,
-    current_width: usize,
-    current_line_index: usize,
-    cursor_position: Option<(u16, usize)>,
+    current_x: usize,
+    current_y: usize,
+    placements: Vec<Placed>,
 }
 
-impl LayoutContext {
-    fn new(width: usize, margin: usize) -> Self {
-        let width = width.saturating_sub(margin);
-        let mut frame = Frame::new();
-        frame.ensure_line();
+impl LayoutEngine {
+    fn new(width: usize) -> Self {
         Self {
-            frame,
             width,
-            current_width: 0,
-            current_line_index: 0,
-            cursor_position: None,
+            current_x: 0,
+            current_y: 0,
+            placements: Vec::new(),
         }
     }
 
-    fn place_drawable(&mut self, drawable: &dyn Drawable) {
-        // Block element zaczyna od nowej linii jeśli coś już jest w obecnej
-        if drawable.display() == Display::Block && self.current_width > 0 {
+    fn place_node(&mut self, index: usize, node: &Node) {
+        // Block element starts on a new line if something is already on the current line
+        if node.opts.display == Display::Block && self.current_x > 0 {
             self.new_line();
         }
 
-        // Sprawdź czy to focused input
-        let cursor_offset = drawable.cursor_offset();
-        let start_col = self.current_width;
+        // Calculate the width of this node
+        let node_width = self.estimate_node_width(node);
 
-        for span in drawable.spans() {
-            self.place_span(span);
-        }
+        // Handle wrapping
+        match node.opts.wrap {
+            Wrap::No => {
+                // No wrap: if doesn't fit on current line, move to next line
+                if self.current_x > 0 && node_width > self.available_width() {
+                    self.new_line();
+                }
 
-        // Jeśli to focused input, oblicz pozycję kursora
-        if let Some(offset) = cursor_offset {
-            // Kursor jest na pozycji start_col + offset (w znakach unicode)
-            let cursor_col = (start_col + offset) as u16;
-            self.cursor_position = Some((cursor_col, self.current_line_index));
-        }
-
-        // Block element NIE kończy automatycznie linii
-        // Następny element (Inline lub Block) sam zdecyduje czy chce być w tej samej linii
-    }
-
-    fn place_span(&mut self, span: Span) {
-        if self.width == 0 || span.width() == 0 {
-            return;
-        }
-
-        match span.wrap() {
-            Wrap::No => self.place_no_wrap(span),
-            Wrap::Yes => self.place_wrap(span),
-        }
-    }
-
-    fn place_no_wrap(&mut self, span: Span) {
-        let span_width = span.width();
-
-        // Jeśli nie mieści się w aktualnej linii, przejdź do nowej
-        if self.current_width > 0 && span_width > self.available_width() {
-            self.new_line();
-        }
-
-        // Przytnij jeśli przekracza całą szerokość
-        let (head, _) = if span_width > self.width {
-            span.split_at_width(self.width)
-        } else {
-            (span, None)
-        };
-
-        self.push_span(head);
-    }
-
-    fn place_wrap(&mut self, mut span: Span) {
-        while span.width() > 0 {
-            if self.current_width >= self.width {
-                self.new_line();
+                // Place the node (even if it exceeds width - it will be clipped)
+                self.place_at_current(index);
+                self.current_x += node_width.min(self.width);
             }
+            Wrap::Yes => {
+                // With wrap: place on current line (wrapping will be handled during rendering)
+                // For now, just track that we placed it
+                if self.current_x >= self.width {
+                    self.new_line();
+                }
 
-            let available = self.available_width();
-            if span.width() <= available {
-                self.push_span(span);
-                return;
-            }
+                self.place_at_current(index);
 
-            let (head, tail) = span.split_at_width(available);
-            if head.width() > 0 {
-                self.push_span(head);
-            }
-            self.new_line();
+                // Update position based on content
+                // If wrapping is needed, renderer will handle it
+                self.current_x += node_width;
 
-            match tail {
-                Some(rest) => span = rest,
-                None => return,
+                // If we exceeded the width, move to next line for next node
+                if self.current_x >= self.width {
+                    self.new_line();
+                }
             }
         }
+
+        // Block elements don't automatically end the line
+        // The next element decides whether to continue or start new line
     }
 
-    fn push_span(&mut self, span: Span) {
-        let w = span.width();
-        self.frame.current_line_mut().push(span);
-        self.current_width += w;
+    fn place_at_current(&mut self, index: usize) {
+        self.placements.push(Placed {
+            index,
+            x: self.current_x,
+            y: self.current_y,
+        });
     }
 
     fn new_line(&mut self) {
-        self.frame.new_line();
-        self.current_width = 0;
-        self.current_line_index += 1;
+        self.current_y += 1;
+        self.current_x = 0;
     }
 
     fn available_width(&self) -> usize {
-        self.width.saturating_sub(self.current_width)
+        self.width.saturating_sub(self.current_x)
     }
 
-    fn finish(mut self) -> RenderContext {
-        self.frame.trim_trailing_empty();
-        let mut ctx = RenderContext::new(self.frame);
-        if let Some((col, line)) = self.cursor_position {
-            ctx.set_cursor(col, line);
+    /// Estimate the display width of a node
+    fn estimate_node_width(&self, node: &Node) -> usize {
+        match &node.kind {
+            NodeKind::Text(text_node) => {
+                // Simple text: just the text width
+                text_node.text.width()
+            }
+            NodeKind::TextInput(text_input) => {
+                // TextInput format: "label: value" or "label: [value]" if focused
+                // For layout purposes, we need to know if it's focused
+                // Since we don't have focus info here, we estimate max width
+
+                let input = &text_input.input;
+                let label_width = input.label.width();
+                let colon_space = ": ".width(); // 2
+                let value_width = input.value.width();
+
+                // Use the larger of: min_width or actual value width
+                let content_width = input.min_width.max(value_width);
+
+                // Assume brackets for focused state (worst case)
+                let brackets = "[]".width(); // 2
+
+                label_width + colon_space + content_width + brackets
+            }
         }
-        ctx
+    }
+
+    fn finish(self) -> Vec<Placed> {
+        self.placements
     }
 }

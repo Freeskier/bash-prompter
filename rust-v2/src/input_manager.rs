@@ -1,6 +1,5 @@
-use crate::event::{Action, AppEvent};
-use crate::event_emitter::EventEmitter;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crate::event::Action;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -52,7 +51,6 @@ impl InputManager {
 
         // Actions
         self.bind(KeyBinding::key(KeyCode::Enter), Action::Submit);
-        self.bind(KeyBinding::key(KeyCode::Esc), Action::Cancel);
 
         // Input navigation
         self.bind(KeyBinding::key(KeyCode::Tab), Action::NextInput);
@@ -79,31 +77,6 @@ impl InputManager {
     pub fn handle_key(&self, key_event: &KeyEvent) -> Option<Action> {
         let binding = KeyBinding::from_key_event(key_event);
         self.bindings.get(&binding).copied()
-    }
-
-    /// Przetwarza event z crossterm i emituje odpowiednie AppEventy
-    pub fn process(&self, event: Event, emitter: &mut EventEmitter) {
-        match event {
-            Event::Key(key_event) => {
-                // Zawsze emituj KeyPressed
-                emitter.emit(&AppEvent::KeyPressed {
-                    code: key_event.code,
-                    modifiers: key_event.modifiers,
-                });
-
-                // Jeśli jest binding, emituj też Action
-                let binding = KeyBinding::from_key_event(&key_event);
-                if let Some(action) = self.bindings.get(&binding) {
-                    emitter.emit(&AppEvent::Action(*action));
-                }
-            }
-
-            Event::Resize(width, height) => {
-                emitter.emit(&AppEvent::Resize { width, height });
-            }
-
-            _ => {}
-        }
     }
 }
 

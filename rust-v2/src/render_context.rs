@@ -1,29 +1,21 @@
-use crate::frame::Frame;
+use crate::node::NodeId;
 
-/// Kontekst renderowania zawierający Frame oraz informacje o kursorze
-#[derive(Debug)]
-pub struct RenderContext {
-    /// Wyrenderowany frame
-    pub frame: Frame,
-
-    /// Pozycja kursora w frame (kolumna, linia) jeśli powinien być widoczny
-    pub cursor_position: Option<(u16, usize)>,
+/// RenderContext holds information needed during rendering
+/// - Who is focused
+/// - Any other rendering hints
+#[derive(Debug, Clone)]
+pub struct RenderContext<'a> {
+    /// Currently focused input ID
+    pub focused_id: Option<&'a NodeId>,
 }
 
-impl RenderContext {
-    pub fn new(frame: Frame) -> Self {
-        Self {
-            frame,
-            cursor_position: None,
-        }
+impl<'a> RenderContext<'a> {
+    pub fn new(focused_id: Option<&'a NodeId>) -> Self {
+        Self { focused_id }
     }
 
-    pub fn with_cursor(mut self, col: u16, line: usize) -> Self {
-        self.cursor_position = Some((col, line));
-        self
-    }
-
-    pub fn set_cursor(&mut self, col: u16, line: usize) {
-        self.cursor_position = Some((col, line));
+    /// Check if a specific ID is focused
+    pub fn is_focused(&self, id: &NodeId) -> bool {
+        self.focused_id == Some(id)
     }
 }
