@@ -69,6 +69,14 @@ pub trait StepExt {
 
     /// Get all input values as HashMap
     fn values(&self) -> HashMap<NodeId, String>;
+
+    // DateInput specific methods
+    fn date_move_next(&mut self, id: &NodeId) -> bool;
+    fn date_move_prev(&mut self, id: &NodeId) -> bool;
+    fn date_increment(&mut self, id: &NodeId) -> bool;
+    fn date_decrement(&mut self, id: &NodeId) -> bool;
+    fn date_insert_digit(&mut self, id: &NodeId, digit: char) -> bool;
+    fn date_delete_digit(&mut self, id: &NodeId) -> bool;
 }
 
 impl StepExt for Step {
@@ -97,19 +105,21 @@ impl StepExt for Step {
 
     fn append_value(&mut self, id: &NodeId, text: &str) -> bool {
         if let Some(node) = self.find_by_id_mut(id)
-            && let Some(v) = node.kind.value_mut() {
-                v.push_str(text);
-                return true;
-            }
+            && let Some(v) = node.kind.value_mut()
+        {
+            v.push_str(text);
+            return true;
+        }
         false
     }
 
     fn insert_text(&mut self, id: &NodeId, text: &str) -> bool {
         if let Some(node) = self.find_by_id_mut(id)
-            && let Some(input) = node.kind.input_mut() {
-                input.insert_text(text);
-                return true;
-            }
+            && let Some(input) = node.kind.input_mut()
+        {
+            input.insert_text(text);
+            return true;
+        }
         false
     }
 
@@ -177,12 +187,13 @@ impl StepExt for Step {
 
         for node in self {
             if let Some(input) = node.kind.input()
-                && let Err(msg) = input.validate() {
-                    errors.push(ValidationError {
-                        id: input.id.clone(),
-                        message: msg,
-                    });
-                }
+                && let Err(msg) = input.validate()
+            {
+                errors.push(ValidationError {
+                    id: input.id.clone(),
+                    message: msg,
+                });
+            }
         }
 
         errors
@@ -193,29 +204,95 @@ impl StepExt for Step {
             .find_by_id(id)
             .ok_or_else(|| "Input not found".to_string())?;
 
-        if let Some(input) = node.kind.input() {
-            input.validate()
-        } else {
-            Ok(())
+        match &node.kind {
+            crate::node::NodeKind::TextInput(text_input) => text_input.input.validate(),
+            crate::node::NodeKind::DateInput(date_input) => date_input.validate(),
+            _ => Ok(()),
         }
     }
 
     fn set_error(&mut self, id: &NodeId, error: String) -> bool {
-        if let Some(node) = self.find_by_id_mut(id)
-            && let Some(input) = node.kind.input_mut() {
-                input.error = Some(error);
-                return true;
+        if let Some(node) = self.find_by_id_mut(id) {
+            match &mut node.kind {
+                crate::node::NodeKind::TextInput(text_input) => {
+                    text_input.input.error = Some(error);
+                    return true;
+                }
+                crate::node::NodeKind::DateInput(date_input) => {
+                    date_input.error = Some(error);
+                    return true;
+                }
+                _ => {}
             }
+        }
         false
     }
 
     fn clear_error(&mut self, id: &NodeId) -> bool {
-        if let Some(node) = self.find_by_id_mut(id)
-            && let Some(input) = node.kind.input_mut() {
-                input.error = None;
-                return true;
+        if let Some(node) = self.find_by_id_mut(id) {
+            match &mut node.kind {
+                crate::node::NodeKind::TextInput(text_input) => {
+                    text_input.input.error = None;
+                    return true;
+                }
+                crate::node::NodeKind::DateInput(date_input) => {
+                    date_input.error = None;
+                    return true;
+                }
+                _ => {}
             }
+        }
         false
+    }
+
+    // DateInput specific methods
+
+    /// Move to next segment in date input
+    fn date_move_next(&mut self, id: &NodeId) -> bool {
+        self.find_by_id_mut(id)
+            .and_then(|node| node.kind.date_input_mut())
+            .map(|date_input| date_input.move_next())
+            .unwrap_or(false)
+    }
+
+    /// Move to previous segment in date input
+    fn date_move_prev(&mut self, id: &NodeId) -> bool {
+        self.find_by_id_mut(id)
+            .and_then(|node| node.kind.date_input_mut())
+            .map(|date_input| date_input.move_prev())
+            .unwrap_or(false)
+    }
+
+    /// Increment current segment in date input
+    fn date_increment(&mut self, id: &NodeId) -> bool {
+        self.find_by_id_mut(id)
+            .and_then(|node| node.kind.date_input_mut())
+            .map(|date_input| date_input.increment())
+            .unwrap_or(false)
+    }
+
+    /// Decrement current segment in date input
+    fn date_decrement(&mut self, id: &NodeId) -> bool {
+        self.find_by_id_mut(id)
+            .and_then(|node| node.kind.date_input_mut())
+            .map(|date_input| date_input.decrement())
+            .unwrap_or(false)
+    }
+
+    /// Insert digit into current segment in date input
+    fn date_insert_digit(&mut self, id: &NodeId, digit: char) -> bool {
+        self.find_by_id_mut(id)
+            .and_then(|node| node.kind.date_input_mut())
+            .map(|date_input| date_input.insert_digit(digit))
+            .unwrap_or(false)
+    }
+
+    /// Delete digit from current segment in date input
+    fn date_delete_digit(&mut self, id: &NodeId) -> bool {
+        self.find_by_id_mut(id)
+            .and_then(|node| node.kind.date_input_mut())
+            .map(|date_input| date_input.delete_digit())
+            .unwrap_or(false)
     }
 
     fn values(&self) -> HashMap<NodeId, String> {

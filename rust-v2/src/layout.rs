@@ -153,6 +153,20 @@ impl LayoutEngine {
 
                 label_width + colon_space + content_width + brackets
             }
+            NodeKind::DateInput(date_input) => {
+                // DateInput format: "label: [DD/MM/YYYY]"
+                let label_width = date_input.label.width();
+                let colon_space = ": ".width(); // 2
+
+                // Calculate width of displayed date string with separators
+                let date_display_width = date_input.display_string().width();
+                let content_width = date_input.min_width.max(date_display_width);
+
+                // Assume brackets for focused state (worst case)
+                let brackets = "[]".width(); // 2
+
+                label_width + colon_space + content_width + brackets
+            }
         }
     }
 

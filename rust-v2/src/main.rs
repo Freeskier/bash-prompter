@@ -69,6 +69,12 @@ fn event_loop(stdout: &mut io::Stdout) -> io::Result<(Renderer, usize)> {
             .min_length(8)
             .min_width(20)
             .build(),
+        Node::date_input("birthdate", "Birth Date", "DD/MM/YYYY")
+            .min_width(15)
+            .build(),
+        Node::date_input("meeting_time", "Meeting Time", "HH:mm")
+            .min_width(10)
+            .build(),
         Node::text("Koniec"),
     ];
 
@@ -130,16 +136,36 @@ fn event_loop(stdout: &mut io::Stdout) -> io::Result<(Renderer, usize)> {
                         )?;
                     }
                 } else {
-                    // No action binding - handle as text input
+                    // No action binding - handle as text/date input
                     if let crossterm::event::Event::Key(ke) = raw_event
-                        && let Some(focused_id) = state.focused() {
-                            // Debug: uncomment to see what keys send
-                            // eprintln!("Key: {:?}, Modifiers: {:?}", ke.code, ke.modifiers);
+                        && let Some(focused_id) = state.focused()
+                    {
+                        // Check what type of input is focused
+                        let focused_node =
+                            step.iter().find(|n| n.kind.input_id() == Some(focused_id));
+                        let is_date_input = focused_node
+                            .map(|n| n.kind.is_date_input())
+                            .unwrap_or(false);
 
-                            let handled = match ke.code {
+                        let handled = if is_date_input {
+                            // DateInput handling
+                            match ke.code {
+                                crossterm::event::KeyCode::Char(ch) if ch.is_ascii_digit() => {
+                                    step.date_insert_digit(focused_id, ch)
+                                }
+                                crossterm::event::KeyCode::Backspace => {
+                                    step.date_delete_digit(focused_id)
+                                }
+                                crossterm::event::KeyCode::Left => step.date_move_prev(focused_id),
+                                crossterm::event::KeyCode::Right => step.date_move_next(focused_id),
+                                crossterm::event::KeyCode::Up => step.date_increment(focused_id),
+                                crossterm::event::KeyCode::Down => step.date_decrement(focused_id),
+                                _ => false,
+                            }
+                        } else {
+                            // TextInput handling
+                            match ke.code {
                                 crossterm::event::KeyCode::Char(ch) => {
-                                    // Only handle regular characters (no Ctrl combinations)
-                                    // Ctrl combinations are handled by InputManager
                                     if !ke
                                         .modifiers
                                         .contains(crossterm::event::KeyModifiers::CONTROL)
@@ -150,8 +176,6 @@ fn event_loop(stdout: &mut io::Stdout) -> io::Result<(Renderer, usize)> {
                                     }
                                 }
                                 crossterm::event::KeyCode::Backspace => {
-                                    // Regular backspace - delete char
-                                    // Ctrl+Backspace is handled by InputManager
                                     if !ke
                                         .modifiers
                                         .contains(crossterm::event::KeyModifiers::CONTROL)
@@ -162,39 +186,33 @@ fn event_loop(stdout: &mut io::Stdout) -> io::Result<(Renderer, usize)> {
                                     }
                                 }
                                 crossterm::event::KeyCode::Delete => {
-                                    // Delete character forward
                                     step.delete_char_forward(focused_id)
                                 }
                                 crossterm::event::KeyCode::Left => {
-                                    // Move cursor left
                                     step.move_cursor_left(focused_id)
                                 }
                                 crossterm::event::KeyCode::Right => {
-                                    // Move cursor right
                                     step.move_cursor_right(focused_id)
                                 }
                                 crossterm::event::KeyCode::Home => {
-                                    // Move cursor to start
                                     step.move_cursor_home(focused_id)
                                 }
-                                crossterm::event::KeyCode::End => {
-                                    // Move cursor to end
-                                    step.move_cursor_end(focused_id)
-                                }
+                                crossterm::event::KeyCode::End => step.move_cursor_end(focused_id),
                                 _ => false,
-                            };
-
-                            if handled {
-                                last_frame_lines = render_step(
-                                    &mut renderer,
-                                    &step,
-                                    &layout,
-                                    &mut terminal,
-                                    &state,
-                                    stdout,
-                                )?;
                             }
+                        };
+
+                        if handled {
+                            last_frame_lines = render_step(
+                                &mut renderer,
+                                &step,
+                                &layout,
+                                &mut terminal,
+                                &state,
+                                stdout,
+                            )?;
                         }
+                    }
                 }
             }
 

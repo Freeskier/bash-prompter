@@ -1,9 +1,9 @@
-use crate::input::InputNode;
+use crate::input::{DateInputNode, InputNode};
 use crate::style::Style;
 use crossterm::style::Color;
 
 // Re-export for convenience
-pub use crate::input::{TextInputBuilder, TextInputNode};
+pub use crate::input::{DateInputBuilder, TextInputBuilder, TextInputNode};
 
 /// Display mode for nodes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +114,7 @@ pub struct TextNode {
 pub enum NodeKind {
     Text(TextNode),
     TextInput(TextInputNode),
+    DateInput(DateInputNode),
 }
 
 impl NodeKind {
@@ -122,6 +123,7 @@ impl NodeKind {
         match self {
             NodeKind::Text(_) => None,
             NodeKind::TextInput(text_input) => Some(&text_input.input.id),
+            NodeKind::DateInput(date_input) => Some(&date_input.id),
         }
     }
 
@@ -130,6 +132,7 @@ impl NodeKind {
         match self {
             NodeKind::Text(_) => None,
             NodeKind::TextInput(text_input) => Some(&mut text_input.input.value),
+            NodeKind::DateInput(_) => None, // DateInput doesn't have a simple string value
         }
     }
 
@@ -138,23 +141,52 @@ impl NodeKind {
         match self {
             NodeKind::Text(_) => None,
             NodeKind::TextInput(text_input) => Some(&text_input.input.value),
+            NodeKind::DateInput(_) => None, // DateInput doesn't have a simple string value
         }
     }
 
-    /// Get reference to InputNode if this is an input
+    /// Get reference to InputNode if this is an input (only for TextInput)
     pub fn input(&self) -> Option<&InputNode> {
         match self {
             NodeKind::Text(_) => None,
             NodeKind::TextInput(text_input) => Some(&text_input.input),
+            NodeKind::DateInput(_) => None,
         }
     }
 
-    /// Get mutable reference to InputNode if this is an input
+    /// Get mutable reference to InputNode if this is an input (only for TextInput)
     pub fn input_mut(&mut self) -> Option<&mut InputNode> {
         match self {
             NodeKind::Text(_) => None,
             NodeKind::TextInput(text_input) => Some(&mut text_input.input),
+            NodeKind::DateInput(_) => None,
         }
+    }
+
+    /// Get mutable reference to DateInputNode
+    pub fn date_input_mut(&mut self) -> Option<&mut DateInputNode> {
+        match self {
+            NodeKind::DateInput(date_input) => Some(date_input),
+            _ => None,
+        }
+    }
+
+    /// Get reference to DateInputNode
+    pub fn date_input(&self) -> Option<&DateInputNode> {
+        match self {
+            NodeKind::DateInput(date_input) => Some(date_input),
+            _ => None,
+        }
+    }
+
+    /// Check if this is a DateInput
+    pub fn is_date_input(&self) -> bool {
+        matches!(self, NodeKind::DateInput(_))
+    }
+
+    /// Check if this is a TextInput
+    pub fn is_text_input(&self) -> bool {
+        matches!(self, NodeKind::TextInput(_))
     }
 }
 
@@ -176,6 +208,16 @@ impl Node {
     /// Create a text input node
     pub fn text_input(id: impl Into<NodeId>, label: impl Into<String>) -> TextInputBuilder {
         TextInputBuilder::new(id.into(), label.into())
+    }
+
+    /// Create a date input builder
+    /// Format examples: "DD/MM/YYYY", "YYYY-MM-DD HH:mm", "HH:mm:ss"
+    pub fn date_input(
+        id: impl Into<NodeId>,
+        label: impl Into<String>,
+        format: impl Into<String>,
+    ) -> DateInputBuilder {
+        DateInputBuilder::new(id.into(), label.into(), format.into())
     }
 
     // Common options setters (builder pattern)

@@ -4,6 +4,7 @@ use crate::node::{Node, NodeKind};
 use crate::render_context::RenderContext;
 use crate::span::Span;
 use crate::step::Step;
+use crate::style::Style;
 use crossterm::style::Color;
 use crossterm::{cursor, queue, terminal};
 use std::io::{Result, Write};
@@ -185,38 +186,42 @@ impl Renderer {
                 let is_focused = ctx.is_focused(&text_input.input.id);
                 self.render_text_input(text_input, &node.opts, is_focused)
             }
+
+            NodeKind::DateInput(date_input) => {
+                let is_focused = ctx.is_focused(&date_input.id);
+                self.render_date_input(date_input, &node.opts, is_focused)
+            }
         }
     }
 
-    /// Render TextInput node
-    fn render_text_input(
+    /// Helper to render common input wrapper (label, brackets, error)
+    fn render_input_wrapper(
         &self,
-        text_input: &crate::node::TextInputNode,
-        opts: &crate::node::Options,
+        label: &str,
         focused: bool,
+        error: Option<&str>,
+        min_width: usize,
+        base_style: &Style,
+        render_content: impl FnOnce(&mut Vec<Span>, usize) -> Option<usize>,
     ) -> (Vec<Span>, Option<usize>) {
-        let input = &text_input.input;
         let mut spans = Vec::new();
         let mut cursor_offset = None;
 
-        // Base style from options
-        let base_style = opts.to_style();
-
         // Label
-        spans.push(Span::new(format!("{}: ", input.label)).with_style(base_style.clone()));
-        let label_width = input.label.width() + 2; // ": "
+        spans.push(Span::new(format!("{}: ", label)).with_style(base_style.clone()));
+        let label_width = label.width() + 2; // ": "
 
         // Opening bracket if focused
         if focused {
             spans.push(Span::new("["));
         }
 
-        // Check if we should display error instead of value
-        if let Some(error_msg) = &input.error {
+        // Check if we should display error instead of content
+        if let Some(error_msg) = error {
             // Display error: "✗ error message" in red, bold
             let error_text = format!("✗ {}", error_msg);
             let error_width = error_text.width();
-            let display_width = input.min_width.max(error_width);
+            let display_width = min_width.max(error_width);
             let mut error_str = error_text;
 
             // Pad to min_width
@@ -230,35 +235,10 @@ impl Renderer {
                 .with_attribute(crossterm::style::Attribute::Bold);
 
             spans.push(Span::new(error_str).with_style(error_style));
-
-            // No cursor when showing error
-            cursor_offset = None;
         } else {
-            // Display value normally
-            let value_width = input.value.width();
-            let display_width = input.min_width.max(value_width);
-            let mut value_str = input.value.clone();
-
-            // Pad to min_width
-            if value_width < display_width {
-                value_str.push_str(&" ".repeat(display_width - value_width));
-            }
-
-            // Style: red if invalid and focused
-            let value_style = if focused && input.validate().is_err() {
-                base_style.clone().with_fg(Color::Red)
-            } else {
-                base_style.clone()
-            };
-
-            spans.push(Span::new(value_str).with_style(value_style));
-
-            // Cursor position: label + "[" + width of text up to cursor
-            if focused {
-                let text_before_cursor: String =
-                    input.value.chars().take(input.cursor_pos).collect();
-                cursor_offset = Some(label_width + 1 + text_before_cursor.width());
-            }
+            // Render actual content
+            let offset_before_content = label_width + if focused { 1 } else { 0 };
+            cursor_offset = render_content(&mut spans, offset_before_content);
         }
 
         // Closing bracket if focused
@@ -267,6 +247,117 @@ impl Renderer {
         }
 
         (spans, cursor_offset)
+    }
+
+    /// Render TextInput node
+    fn render_text_input(
+        &self,
+        text_input: &crate::node::TextInputNode,
+        opts: &crate::node::Options,
+        focused: bool,
+    ) -> (Vec<Span>, Option<usize>) {
+        let input = &text_input.input;
+        let base_style = opts.to_style();
+
+        self.render_input_wrapper(
+            &input.label,
+            focused,
+            input.error.as_deref(),
+            input.min_width,
+            &base_style,
+            |spans, offset_before_content| {
+                // Display value normally
+                let value_width = input.value.width();
+                let display_width = input.min_width.max(value_width);
+                let mut value_str = input.value.clone();
+
+                // Pad to min_width
+                if value_width < display_width {
+                    value_str.push_str(&" ".repeat(display_width - value_width));
+                }
+
+                // Style: red if invalid and focused
+                let value_style = if focused && input.validate().is_err() {
+                    base_style.clone().with_fg(Color::Red)
+                } else {
+                    base_style.clone()
+                };
+
+                spans.push(Span::new(value_str).with_style(value_style));
+
+                // Cursor position: offset + width of text up to cursor
+                if focused {
+                    let text_before_cursor: String =
+                        input.value.chars().take(input.cursor_pos).collect();
+                    Some(offset_before_content + text_before_cursor.width())
+                } else {
+                    None
+                }
+            },
+        )
+    }
+
+    /// Render DateInput node
+    fn render_date_input(
+        &self,
+        date_input: &crate::input::DateInputNode,
+        opts: &crate::node::Options,
+        focused: bool,
+    ) -> (Vec<Span>, Option<usize>) {
+        let base_style = opts.to_style();
+
+        self.render_input_wrapper(
+            &date_input.label,
+            focused,
+            date_input.error.as_deref(),
+            date_input.min_width,
+            &base_style,
+            |spans, mut current_offset| {
+                // Display segments with separators
+                let mut cursor_offset = None;
+
+                for (i, segment) in date_input.segments.iter().enumerate() {
+                    let is_focused_segment = focused && i == date_input.focused_segment;
+
+                    // Segment style: bold if this segment is focused
+                    let segment_style = if is_focused_segment {
+                        base_style
+                            .clone()
+                            .with_attribute(crossterm::style::Attribute::Bold)
+                    } else {
+                        base_style.clone()
+                    };
+
+                    let segment_text = segment.display_string();
+                    let segment_width = segment_text.width();
+
+                    spans.push(Span::new(segment_text).with_style(segment_style));
+
+                    // Track cursor position for focused segment
+                    if is_focused_segment {
+                        cursor_offset = Some(current_offset);
+                    }
+
+                    current_offset += segment_width;
+
+                    // Add separator after segment (if not last)
+                    if i < date_input.separators.len() {
+                        let sep = &date_input.separators[i];
+                        spans.push(Span::new(sep.clone()).with_style(base_style.clone()));
+                        current_offset += sep.width();
+                    }
+                }
+
+                // Pad to min_width if needed
+                let date_display_width = date_input.display_string().width();
+                if date_display_width < date_input.min_width {
+                    let padding = date_input.min_width - date_display_width;
+                    spans.push(Span::new(" ".repeat(padding)));
+                }
+
+                cursor_offset
+            },
+        )
     }
 }
 
