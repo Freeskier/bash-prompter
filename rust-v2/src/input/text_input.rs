@@ -187,6 +187,9 @@ impl TextInputBuilder {
 
     pub fn min_length(self, len: usize) -> Self {
         self.validator(crate::validators::min_length(len))
+
+        self.value = chars.into_iter().collect();
+        self.cursor_pos = pos + text.chars().count();
     }
 
     pub fn max_length(self, len: usize) -> Self {
@@ -247,6 +250,13 @@ impl TextInputBuilder {
             opts: self.opts,
             kind: NodeKind::TextInput(TextInputNode { input: self.input }),
         }
+    }
+}
+
+// Auto-build when used in Vec<Node>
+impl From<TextInputBuilder> for Node {
+    fn from(builder: TextInputBuilder) -> Self {
+        builder.build()
     }
 }
 
