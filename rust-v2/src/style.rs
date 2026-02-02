@@ -49,4 +49,17 @@ impl Style {
         self.attributes = attributes;
         self
     }
+
+    pub fn merge(mut self, other: &Style) -> Self {
+        if other.fg.is_some() {
+            self.fg = other.fg;
+        }
+        if other.bg.is_some() {
+            self.bg = other.bg;
+        }
+        if !other.attributes.is_empty() {
+            self.attributes.extend_from_slice(&other.attributes);
+        }
+        self
+    }
 }

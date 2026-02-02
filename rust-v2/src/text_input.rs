@@ -155,14 +155,6 @@ impl Input for TextInput {
         self.base.error = error;
     }
 
-    fn show_error_message(&self) -> bool {
-        self.base.show_error_message
-    }
-
-    fn set_show_error_message(&mut self, show: bool) {
-        self.base.show_error_message = show;
-    }
-
     fn cursor_pos(&self) -> usize {
         self.cursor_pos
     }

@@ -18,10 +18,30 @@ impl Layout {
     }
 
     pub fn compose(&self, nodes: &[Node], width: u16) -> Frame {
+        self.compose_with(nodes, width, |node| node.render(false))
+    }
+
+    pub fn compose_with<F>(&self, nodes: &[Node], width: u16, render: F) -> Frame
+    where
+        F: Fn(&Node) -> Vec<Span>,
+    {
         let mut ctx = LayoutContext::new(width as usize, self.margin);
 
         for node in nodes {
-            ctx.place_node(node);
+            ctx.place_spans(render(node));
+        }
+
+        ctx.finish()
+    }
+
+    pub fn compose_spans<I>(&self, spans_list: I, width: u16) -> Frame
+    where
+        I: IntoIterator<Item = Vec<Span>>,
+    {
+        let mut ctx = LayoutContext::new(width as usize, self.margin);
+
+        for spans in spans_list {
+            ctx.place_spans(spans);
         }
 
         ctx.finish()
@@ -46,8 +66,8 @@ impl LayoutContext {
         }
     }
 
-    fn place_node(&mut self, node: &Node) {
-        for span in node.render() {
+    fn place_spans(&mut self, spans: Vec<Span>) {
+        for span in spans {
             if span.text() == "\n" {
                 self.new_line();
                 continue;

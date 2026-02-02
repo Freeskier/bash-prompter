@@ -22,8 +22,6 @@ pub trait Input: Send {
 
     fn error(&self) -> Option<&str>;
     fn set_error(&mut self, error: Option<String>);
-    fn show_error_message(&self) -> bool;
-    fn set_show_error_message(&mut self, show: bool);
 
     fn cursor_pos(&self) -> usize;
     fn min_width(&self) -> usize;
@@ -52,7 +50,6 @@ pub struct InputBase {
     pub label: String,
     pub focused: bool,
     pub error: Option<String>,
-    pub show_error_message: bool,
     pub validators: Vec<Validator>,
     pub min_width: usize,
 }
@@ -64,7 +61,6 @@ impl InputBase {
             label: label.into(),
             focused: false,
             error: None,
-            show_error_message: false,
             validators: Vec::new(),
             min_width: 20,
         }
