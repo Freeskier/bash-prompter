@@ -1,6 +1,12 @@
-use crate::node::Wrap;
 use crate::style::Style;
 use unicode_width::UnicodeWidthStr;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Wrap {
+    #[default]
+    Yes,
+    No,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Span {

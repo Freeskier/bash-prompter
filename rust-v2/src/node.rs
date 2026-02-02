@@ -1,259 +1,115 @@
-use crate::input::{DateInputNode, InputNode};
+use crate::input::Input;
+use crate::span::Span;
 use crate::style::Style;
 use crossterm::style::Color;
+use unicode_width::UnicodeWidthStr;
 
-// Re-export for convenience
-pub use crate::input::{DateInputBuilder, TextInputBuilder, TextInputNode};
-
-/// Display mode for nodes
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Display {
-    Block,
-    Inline,
-}
-
-/// Text wrapping behavior
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Wrap {
-    Yes,
-    No,
-}
-
-/// Unique identifier for nodes (especially inputs)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NodeId(String);
-
-impl NodeId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&str> for NodeId {
-    fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
-}
-
-impl From<String> for NodeId {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-/// Display and styling options for a node
-#[derive(Debug, Clone)]
-pub struct Options {
-    pub display: Display,
-    pub wrap: Wrap,
-    pub color: Option<Color>,
-    pub background: Option<Color>,
-    pub bold: bool,
-    pub italic: bool,
-    pub underline: bool,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            display: Display::Block,
-            wrap: Wrap::Yes,
-            color: None,
-            background: None,
-            bold: false,
-            italic: false,
-            underline: false,
-        }
-    }
-}
-
-impl Options {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Convert Options to Style
-    pub fn to_style(&self) -> Style {
-        let mut style = Style::new();
-
-        if let Some(fg) = self.color {
-            style = style.with_fg(fg);
-        }
-
-        if let Some(bg) = self.background {
-            style = style.with_bg(bg);
-        }
-
-        if self.bold {
-            style = style.with_attribute(crossterm::style::Attribute::Bold);
-        }
-
-        if self.italic {
-            style = style.with_attribute(crossterm::style::Attribute::Italic);
-        }
-
-        if self.underline {
-            style = style.with_attribute(crossterm::style::Attribute::Underlined);
-        }
-
-        style
-    }
-}
-
-/// Text node - just displays static text
-#[derive(Debug, Clone)]
-pub struct TextNode {
-    pub text: String,
-}
-
-/// The kind of node - what it represents semantically
-pub enum NodeKind {
-    Text(TextNode),
-    TextInput(TextInputNode),
-    DateInput(DateInputNode),
-}
-
-impl NodeKind {
-    /// Get the input ID if this is an input node
-    pub fn input_id(&self) -> Option<&NodeId> {
-        match self {
-            NodeKind::Text(_) => None,
-            NodeKind::TextInput(text_input) => Some(&text_input.input.id),
-            NodeKind::DateInput(date_input) => Some(&date_input.id),
-        }
-    }
-
-    /// Get mutable reference to value if this is an input
-    pub fn value_mut(&mut self) -> Option<&mut String> {
-        match self {
-            NodeKind::Text(_) => None,
-            NodeKind::TextInput(text_input) => Some(&mut text_input.input.value),
-            NodeKind::DateInput(_) => None, // DateInput doesn't have a simple string value
-        }
-    }
-
-    /// Get reference to value if this is an input
-    pub fn value(&self) -> Option<&str> {
-        match self {
-            NodeKind::Text(_) => None,
-            NodeKind::TextInput(text_input) => Some(&text_input.input.value),
-            NodeKind::DateInput(_) => None, // DateInput doesn't have a simple string value
-        }
-    }
-
-    /// Get reference to InputNode if this is an input (only for TextInput)
-    pub fn input(&self) -> Option<&InputNode> {
-        match self {
-            NodeKind::Text(_) => None,
-            NodeKind::TextInput(text_input) => Some(&text_input.input),
-            NodeKind::DateInput(_) => None,
-        }
-    }
-
-    /// Get mutable reference to InputNode if this is an input (only for TextInput)
-    pub fn input_mut(&mut self) -> Option<&mut InputNode> {
-        match self {
-            NodeKind::Text(_) => None,
-            NodeKind::TextInput(text_input) => Some(&mut text_input.input),
-            NodeKind::DateInput(_) => None,
-        }
-    }
-
-    /// Get mutable reference to DateInputNode
-    pub fn date_input_mut(&mut self) -> Option<&mut DateInputNode> {
-        match self {
-            NodeKind::DateInput(date_input) => Some(date_input),
-            _ => None,
-        }
-    }
-
-    /// Get reference to DateInputNode
-    pub fn date_input(&self) -> Option<&DateInputNode> {
-        match self {
-            NodeKind::DateInput(date_input) => Some(date_input),
-            _ => None,
-        }
-    }
-
-    /// Check if this is a DateInput
-    pub fn is_date_input(&self) -> bool {
-        matches!(self, NodeKind::DateInput(_))
-    }
-
-    /// Check if this is a TextInput
-    pub fn is_text_input(&self) -> bool {
-        matches!(self, NodeKind::TextInput(_))
-    }
-}
-
-/// A node in the step - combines kind (what) with options (how to display)
-pub struct Node {
-    pub opts: Options,
-    pub kind: NodeKind,
+pub enum Node {
+    Text(String),
+    Input(Box<dyn Input>),
 }
 
 impl Node {
-    /// Create a text node
     pub fn text(text: impl Into<String>) -> Self {
-        Self {
-            opts: Options::default(),
-            kind: NodeKind::Text(TextNode { text: text.into() }),
+        Node::Text(text.into())
+    }
+
+    pub fn input(input: impl Input + 'static) -> Self {
+        Node::Input(Box::new(input))
+    }
+
+    pub fn as_input(&self) -> Option<&dyn Input> {
+        match self {
+            Node::Input(input) => Some(input.as_ref()),
+            _ => None,
         }
     }
 
-    /// Create a text input node
-    pub fn text_input(id: impl Into<NodeId>, label: impl Into<String>) -> TextInputBuilder {
-        TextInputBuilder::new(id.into(), label.into())
+    pub fn as_input_mut(&mut self) -> Option<&mut dyn Input> {
+        match self {
+            Node::Input(input) => Some(input.as_mut()),
+            _ => None,
+        }
     }
 
-    /// Create a date input builder
-    /// Format examples: "DD/MM/YYYY", "YYYY-MM-DD HH:mm", "HH:mm:ss"
-    pub fn date_input(
-        id: impl Into<NodeId>,
-        label: impl Into<String>,
-        format: impl Into<String>,
-    ) -> DateInputBuilder {
-        DateInputBuilder::new(id.into(), label.into(), format.into())
+    pub fn render(&self) -> Vec<Span> {
+        match self {
+            Node::Text(text) => vec![Span::new(text.clone())],
+            Node::Input(input) => {
+                let mut spans = vec![Span::new(input.label()), Span::new(": ")];
+                let error_style = Style::new()
+                    .with_fg(Color::Red)
+                    .with_attribute(crossterm::style::Attribute::Bold);
+
+                if input.is_focused() {
+                    spans.push(Span::new("["));
+                    let content_spans = if input.show_error_message() {
+                        if let Some(err) = input.error() {
+                            vec![
+                                Span::new("✗ ").with_style(error_style.clone()),
+                                Span::new(err).with_style(error_style.clone()),
+                            ]
+                        } else {
+                            input.render_content()
+                        }
+                    } else {
+                        let mut spans = input.render_content();
+                        if input.error().is_some() {
+                            spans = spans
+                                .into_iter()
+                                .map(|span| span.with_style(error_style.clone()))
+                                .collect();
+                        }
+                        spans
+                    };
+
+                    let content_width: usize =
+                        content_spans.iter().map(|s| s.text().width()).sum();
+                    spans.extend(content_spans);
+
+                    if content_width < input.min_width() {
+                        let padding = input.min_width() - content_width;
+                        spans.push(Span::new(" ".repeat(padding)));
+                    }
+
+                    spans.push(Span::new("]"));
+                } else {
+                    let content_spans = if input.show_error_message() {
+                        if let Some(err) = input.error() {
+                            vec![
+                                Span::new("✗ ").with_style(error_style.clone()),
+                                Span::new(err).with_style(error_style.clone()),
+                            ]
+                        } else {
+                            input.render_content()
+                        }
+                    } else {
+                        let mut spans = input.render_content();
+                        if input.error().is_some() {
+                            spans = spans
+                                .into_iter()
+                                .map(|span| span.with_style(error_style.clone()))
+                                .collect();
+                        }
+                        spans
+                    };
+                    spans.extend(content_spans);
+                }
+
+                spans
+            }
+        }
     }
 
-    // Common options setters (builder pattern)
-
-    pub fn with_display(mut self, display: Display) -> Self {
-        self.opts.display = display;
-        self
-    }
-
-    pub fn with_wrap(mut self, wrap: Wrap) -> Self {
-        self.opts.wrap = wrap;
-        self
-    }
-
-    pub fn with_color(mut self, color: Color) -> Self {
-        self.opts.color = Some(color);
-        self
-    }
-
-    pub fn with_background(mut self, bg: Color) -> Self {
-        self.opts.background = Some(bg);
-        self
-    }
-
-    pub fn bold(mut self) -> Self {
-        self.opts.bold = true;
-        self
-    }
-
-    pub fn italic(mut self) -> Self {
-        self.opts.italic = true;
-        self
-    }
-
-    pub fn underline(mut self) -> Self {
-        self.opts.underline = true;
-        self
+    pub fn cursor_offset(&self) -> Option<usize> {
+        match self {
+            Node::Input(input) if input.is_focused() => {
+                let label_len = input.label().width() + 2;
+                let bracket_len = 1;
+                let content_offset = input.cursor_offset_in_content();
+                Some(label_len + bracket_len + content_offset)
+            }
+            _ => None,
+        }
     }
 }

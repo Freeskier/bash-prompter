@@ -1,7 +1,7 @@
 use regex::Regex;
 
 /// Validator function type - returns Ok(()) if valid, Err(message) if invalid
-pub type Validator = Box<dyn Fn(&str) -> Result<(), String>>;
+pub type Validator = Box<dyn Fn(&str) -> Result<(), String> + Send>;
 
 /// Creates a validator that checks if value is not empty
 pub fn required() -> Validator {
@@ -67,7 +67,7 @@ pub fn alphanumeric() -> Validator {
 /// Creates a custom validator with a specific error message
 pub fn custom<F>(f: F, message: impl Into<String>) -> Validator
 where
-    F: Fn(&str) -> bool + 'static,
+    F: Fn(&str) -> bool + Send + 'static,
 {
     let msg = message.into();
     Box::new(

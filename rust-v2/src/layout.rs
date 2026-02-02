@@ -1,27 +1,15 @@
-use crate::node::{Display, Wrap};
-use crate::node::{Node, NodeKind};
-use unicode_width::UnicodeWidthStr;
+use crate::frame::Frame;
+use crate::node::Node;
+use crate::span::{Span, Wrap};
 
-/// Positioned node - contains the index and position for a node
-#[derive(Debug, Clone)]
-pub struct Placed {
-    /// Index in the Step (Vec<Node>)
-    pub index: usize,
-    /// X position (column)
-    pub x: usize,
-    /// Y position (row/line)
-    pub y: usize,
-}
-
-/// Layout engine - converts Step (&[Node]) into positioned nodes (Vec<Placed>)
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Default)]
 pub struct Layout {
     margin: usize,
 }
 
 impl Layout {
     pub fn new() -> Self {
-        Self { margin: 2 }
+        Self { margin: 0 }
     }
 
     pub fn with_margin(mut self, margin: usize) -> Self {
@@ -29,148 +17,114 @@ impl Layout {
         self
     }
 
-    /// Layout nodes and return their positions
-    pub fn layout(&self, nodes: &[Node], width: u16) -> Vec<Placed> {
-        let effective_width = (width as usize).saturating_sub(self.margin);
-        let mut engine = LayoutEngine::new(effective_width);
+    pub fn compose(&self, nodes: &[Node], width: u16) -> Frame {
+        let mut ctx = LayoutContext::new(width as usize, self.margin);
 
-        for (index, node) in nodes.iter().enumerate() {
-            engine.place_node(index, node);
+        for node in nodes {
+            ctx.place_node(node);
         }
 
-        engine.finish()
+        ctx.finish()
     }
 }
 
-impl Default for Layout {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Internal layout engine
-struct LayoutEngine {
+struct LayoutContext {
+    frame: Frame,
     width: usize,
-    current_x: usize,
-    current_y: usize,
-    placements: Vec<Placed>,
+    current_width: usize,
 }
 
-impl LayoutEngine {
-    fn new(width: usize) -> Self {
+impl LayoutContext {
+    fn new(width: usize, margin: usize) -> Self {
+        let width = width.saturating_sub(margin);
+        let mut frame = Frame::new();
+        frame.ensure_line();
         Self {
+            frame,
             width,
-            current_x: 0,
-            current_y: 0,
-            placements: Vec::new(),
+            current_width: 0,
         }
     }
 
-    fn place_node(&mut self, index: usize, node: &Node) {
-        // Block element starts on a new line if something is already on the current line
-        if node.opts.display == Display::Block && self.current_x > 0 {
+    fn place_node(&mut self, node: &Node) {
+        for span in node.render() {
+            if span.text() == "\n" {
+                self.new_line();
+                continue;
+            }
+            self.place_span(span);
+        }
+        self.new_line();
+    }
+
+    fn place_span(&mut self, span: Span) {
+        if self.width == 0 || span.width() == 0 {
+            return;
+        }
+
+        match span.wrap() {
+            Wrap::No => self.place_no_wrap(span),
+            Wrap::Yes => self.place_wrap(span),
+        }
+    }
+
+    fn place_no_wrap(&mut self, span: Span) {
+        let span_width = span.width();
+        if self.current_width > 0 && span_width > self.available_width() {
             self.new_line();
         }
 
-        // Calculate the width of this node
-        let node_width = self.estimate_node_width(node);
+        let (head, _) = if span_width > self.width {
+            span.split_at_width(self.width)
+        } else {
+            (span, None)
+        };
 
-        // Handle wrapping
-        match node.opts.wrap {
-            Wrap::No => {
-                // No wrap: if doesn't fit on current line, move to next line
-                if self.current_x > 0 && node_width > self.available_width() {
-                    self.new_line();
-                }
-
-                // Place the node (even if it exceeds width - it will be clipped)
-                self.place_at_current(index);
-                self.current_x += node_width.min(self.width);
-            }
-            Wrap::Yes => {
-                // With wrap: place on current line (wrapping will be handled during rendering)
-                // For now, just track that we placed it
-                if self.current_x >= self.width {
-                    self.new_line();
-                }
-
-                self.place_at_current(index);
-
-                // Update position based on content
-                // If wrapping is needed, renderer will handle it
-                self.current_x += node_width;
-
-                // If we exceeded the width, move to next line for next node
-                if self.current_x >= self.width {
-                    self.new_line();
-                }
-            }
-        }
-
-        // Block elements don't automatically end the line
-        // The next element decides whether to continue or start new line
+        self.push_span(head);
     }
 
-    fn place_at_current(&mut self, index: usize) {
-        self.placements.push(Placed {
-            index,
-            x: self.current_x,
-            y: self.current_y,
-        });
+    fn place_wrap(&mut self, mut span: Span) {
+        while span.width() > 0 {
+            if self.current_width >= self.width {
+                self.new_line();
+            }
+
+            let available = self.available_width();
+            if span.width() <= available {
+                self.push_span(span);
+                return;
+            }
+
+            let (head, tail) = span.split_at_width(available);
+            if head.width() > 0 {
+                self.push_span(head);
+            }
+            self.new_line();
+
+            match tail {
+                Some(rest) => span = rest,
+                None => return,
+            }
+        }
+    }
+
+    fn push_span(&mut self, span: Span) {
+        let w = span.width();
+        self.frame.current_line_mut().push(span);
+        self.current_width += w;
     }
 
     fn new_line(&mut self) {
-        self.current_y += 1;
-        self.current_x = 0;
+        self.frame.new_line();
+        self.current_width = 0;
     }
 
     fn available_width(&self) -> usize {
-        self.width.saturating_sub(self.current_x)
+        self.width.saturating_sub(self.current_width)
     }
 
-    /// Estimate the display width of a node
-    fn estimate_node_width(&self, node: &Node) -> usize {
-        match &node.kind {
-            NodeKind::Text(text_node) => {
-                // Simple text: just the text width
-                text_node.text.width()
-            }
-            NodeKind::TextInput(text_input) => {
-                // TextInput format: "label: value" or "label: [value]" if focused
-                // For layout purposes, we need to know if it's focused
-                // Since we don't have focus info here, we estimate max width
-
-                let input = &text_input.input;
-                let label_width = input.label.width();
-                let colon_space = ": ".width(); // 2
-                let value_width = input.value.width();
-
-                // Use the larger of: min_width or actual value width
-                let content_width = input.min_width.max(value_width);
-
-                // Assume brackets for focused state (worst case)
-                let brackets = "[]".width(); // 2
-
-                label_width + colon_space + content_width + brackets
-            }
-            NodeKind::DateInput(date_input) => {
-                // DateInput format: "label: [DD/MM/YYYY]"
-                let label_width = date_input.label.width();
-                let colon_space = ": ".width(); // 2
-
-                // Calculate width of displayed date string with separators
-                let date_display_width = date_input.display_string().width();
-                let content_width = date_input.min_width.max(date_display_width);
-
-                // Assume brackets for focused state (worst case)
-                let brackets = "[]".width(); // 2
-
-                label_width + colon_space + content_width + brackets
-            }
-        }
-    }
-
-    fn finish(self) -> Vec<Placed> {
-        self.placements
+    fn finish(mut self) -> Frame {
+        self.frame.trim_trailing_empty();
+        self.frame
     }
 }

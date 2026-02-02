@@ -1,5 +1,6 @@
-use crate::input::{Input, InputBase, KeyResult, NodeId, Validator};
+use crate::input::{Input, InputBase, KeyResult, NodeId};
 use crate::span::Span;
+use crate::validators::Validator;
 use crossterm::event::{KeyCode, KeyModifiers};
 use unicode_width::UnicodeWidthStr;
 
@@ -102,7 +103,7 @@ impl TextInput {
 
     fn delete_word_forward_impl(&mut self) {
         let mut chars: Vec<char> = self.value.chars().collect();
-        let mut pos = self.cursor_pos;
+        let pos = self.cursor_pos;
 
         while pos < chars.len() && chars.get(pos).is_some_and(|c| c.is_whitespace()) {
             chars.remove(pos);
@@ -152,6 +153,14 @@ impl Input for TextInput {
 
     fn set_error(&mut self, error: Option<String>) {
         self.base.error = error;
+    }
+
+    fn show_error_message(&self) -> bool {
+        self.base.show_error_message
+    }
+
+    fn set_show_error_message(&mut self, show: bool) {
+        self.base.show_error_message = show;
     }
 
     fn cursor_pos(&self) -> usize {

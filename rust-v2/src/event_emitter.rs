@@ -7,6 +7,7 @@ pub type EventHandler = Box<dyn FnMut(&AppEvent) + Send>;
 pub enum AppEvent {
     Action(Action),
     InputChanged { id: String, value: String },
+    FocusChanged { from: Option<String>, to: Option<String> },
     ValidationFailed { id: String, error: String },
     Submitted,
 }

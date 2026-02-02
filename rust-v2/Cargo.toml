@@ -1,8 +1,5 @@
-[build]
-rustflags = ["-Awarnings"]
-
 [package]
-name = "rust-v2"
+name = "rustical"
 version = "0.1.0"
 edition = "2024"
 

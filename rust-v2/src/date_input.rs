@@ -1,6 +1,7 @@
-use crate::input::{Input, InputBase, KeyResult, NodeId, Validator};
+use crate::input::{Input, InputBase, KeyResult, NodeId};
 use crate::span::Span;
 use crate::style::Style;
+use crate::validators::Validator;
 use crossterm::event::{KeyCode, KeyModifiers};
 use crossterm::style::Color;
 use unicode_width::UnicodeWidthStr;
@@ -68,6 +69,21 @@ impl DateSegment {
         }
     }
 
+    fn is_empty(&self) -> bool {
+        self.value.is_empty()
+    }
+
+    fn placeholder(&self) -> &'static str {
+        match self.segment_type {
+            SegmentType::Year => "yyyy",
+            SegmentType::Month => "mm",
+            SegmentType::Day => "dd",
+            SegmentType::Hour => "hh",
+            SegmentType::Minute => "mm",
+            SegmentType::Second => "ss",
+        }
+    }
+
     fn numeric_value(&self) -> u32 {
         self.value.parse().unwrap_or(0)
     }
@@ -125,9 +141,14 @@ impl DateSegment {
     fn display_string(&self) -> String {
         let len = self.segment_type.length();
         if self.value.is_empty() {
-            "_".repeat(len)
+            self.placeholder().to_string()
         } else if self.value.len() < len {
-            format!("{}{}", self.value, "_".repeat(len - self.value.len()))
+            let placeholder = self.placeholder();
+            format!(
+                "{}{}",
+                self.value,
+                &placeholder[self.value.len()..len]
+            )
         } else {
             self.value.clone()
         }
@@ -274,6 +295,14 @@ impl Input for DateInput {
         self.base.error = error;
     }
 
+    fn show_error_message(&self) -> bool {
+        self.base.show_error_message
+    }
+
+    fn set_show_error_message(&mut self, show: bool) {
+        self.base.show_error_message = show;
+    }
+
     fn cursor_pos(&self) -> usize {
         self.focused_segment
     }
@@ -357,11 +386,16 @@ impl Input for DateInput {
                 spans.push(Span::new(&self.separators[i]));
             }
 
-            let style = if i == self.focused_segment && self.base.focused {
-                Style::new().with_fg(Color::Yellow)
+            let mut style = if segment.is_empty() {
+                Style::new().with_fg(Color::DarkGrey)
             } else {
                 Style::default()
             };
+
+            if i == self.focused_segment && self.base.focused {
+                style = style.with_attribute(crossterm::style::Attribute::Bold);
+            }
+
             spans.push(Span::new(segment.display_string()).with_style(style));
         }
 
