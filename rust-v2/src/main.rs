@@ -22,6 +22,10 @@ fn main() {
 
 fn run() -> io::Result<()> {
     let mut stdout = io::stdout();
+    let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let text = "Przetwarzam dane... Dane są ukryte i bardzo niebezpieczne dla niektórych człowieczków mały";
+    let mut idx = 0usize;
+    let mut prev_line_count = 1usize;
 
     terminal::enable_raw_mode()?;
     execute!(stdout, terminal::DisableLineWrap)?;
@@ -214,6 +218,14 @@ fn event_loop(stdout: &mut io::Stdout) -> io::Result<(Renderer, usize)> {
                         }
                     }
                 }
+                Event::Resize(_, _) => {
+                    // Po resize terminala, zaktualizuj anchor_row
+                    // Kursor jest zawsze w kolumnie 0 (dzięki MoveToColumn po write)
+                    // więc cursor::position() zwraca poprawną wartość
+                    let (_, new_row) = cursor::position().unwrap();
+                    anchor_row = new_row;
+                }
+                _ => {}
             }
 
             crossterm::event::Event::Resize(_, _) => {
