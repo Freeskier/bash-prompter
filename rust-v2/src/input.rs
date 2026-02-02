@@ -62,7 +62,7 @@ impl InputBase {
             focused: false,
             error: None,
             validators: Vec::new(),
-            min_width: 20,
+            min_width: 1,
         }
     }
 

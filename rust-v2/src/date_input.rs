@@ -73,6 +73,10 @@ impl DateSegment {
         self.value.is_empty()
     }
 
+    fn is_complete(&self) -> bool {
+        self.value.len() == self.segment_type.length()
+    }
+
     fn placeholder(&self) -> &'static str {
         match self.segment_type {
             SegmentType::Year => "yyyy",
@@ -153,9 +157,21 @@ impl DateSegment {
             self.value.clone()
         }
     }
+
+    fn normalize(&mut self) {
+        if self.value.is_empty() {
+            return;
+        }
+        let len = self.segment_type.length();
+        if self.value.len() < len {
+            if let Ok(val) = self.value.parse::<u32>() {
+                self.value = format!("{:0width$}", val, width = len);
+            }
+        }
+    }
 }
 
-pub struct DateInput {
+pub struct DateTimeInput {
     base: InputBase,
     format: String,
     segments: Vec<DateSegment>,
@@ -163,7 +179,9 @@ pub struct DateInput {
     focused_segment: usize,
 }
 
-impl DateInput {
+pub type DateInput = DateTimeInput;
+
+impl DateTimeInput {
     pub fn new(id: impl Into<String>, label: impl Into<String>, format: impl Into<String>) -> Self {
         let format_str = format.into();
         let (segments, separators) = Self::parse_format(&format_str);
@@ -233,14 +251,27 @@ impl DateInput {
         result
     }
 
+    fn format_value(&self) -> String {
+        let mut result = String::new();
+        for (i, segment) in self.segments.iter().enumerate() {
+            if i < self.separators.len() {
+                result.push_str(&self.separators[i]);
+            }
+            result.push_str(&segment.value);
+        }
+        if self.segments.len() < self.separators.len() {
+            result.push_str(&self.separators[self.segments.len()]);
+        }
+        result
+    }
+
+    fn is_complete(&self) -> bool {
+        self.segments.iter().all(|s| s.is_complete())
+    }
+
     fn move_next(&mut self) -> bool {
         if let Some(segment) = self.segments.get_mut(self.focused_segment) {
-            if !segment.value.is_empty() {
-                let len = segment.segment_type.length();
-                if segment.value.len() < len {
-                    segment.value = format!("{:0width$}", segment.value, width = len);
-                }
-            }
+            segment.normalize();
         }
 
         if self.focused_segment + 1 < self.segments.len() {
@@ -261,7 +292,7 @@ impl DateInput {
     }
 }
 
-impl Input for DateInput {
+impl Input for DateTimeInput {
     fn id(&self) -> &NodeId {
         &self.base.id
     }
@@ -271,10 +302,55 @@ impl Input for DateInput {
     }
 
     fn value(&self) -> String {
-        self.display_string()
+        if self.is_complete() {
+            self.format_value()
+        } else {
+            String::new()
+        }
     }
 
-    fn set_value(&mut self, _value: String) {}
+    fn set_value(&mut self, value: String) {
+        if !self.format.is_empty() && value.len() != self.format.len() {
+            return;
+        }
+
+        for segment in &mut self.segments {
+            segment.value.clear();
+        }
+
+        let mut pos = 0usize;
+        for (i, segment) in self.segments.iter_mut().enumerate() {
+            if pos > value.len() {
+                return;
+            }
+            let sep = self.separators.get(i).map(String::as_str).unwrap_or("");
+            if !sep.is_empty() {
+                if value[pos..].starts_with(sep) {
+                    pos += sep.len();
+                } else {
+                    return;
+                }
+            }
+
+            let len = segment.segment_type.length();
+            if pos + len > value.len() {
+                return;
+            }
+            let part = &value[pos..pos + len];
+            if part.chars().all(|c| c.is_ascii_digit()) {
+                segment.value = part.to_string();
+            } else {
+                return;
+            }
+            pos += len;
+        }
+
+        if let Some(trailing) = self.separators.get(self.segments.len()) {
+            if !trailing.is_empty() && value[pos..].starts_with(trailing) {
+                // trailing separator is allowed; nothing to store
+            }
+        }
+    }
 
     fn is_focused(&self) -> bool {
         self.base.focused
@@ -357,12 +433,7 @@ impl Input for DateInput {
             }
             KeyCode::Enter => {
                 if let Some(segment) = self.segments.get_mut(self.focused_segment) {
-                    if !segment.value.is_empty() {
-                        let len = segment.segment_type.length();
-                        if segment.value.len() < len {
-                            segment.value = format!("{:0width$}", segment.value, width = len);
-                        }
-                    }
+                    segment.normalize();
                 }
                 KeyResult::Submit
             }

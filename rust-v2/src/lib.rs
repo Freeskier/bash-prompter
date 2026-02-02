@@ -13,7 +13,7 @@ pub mod theme;
 pub mod view_state;
 pub mod renderer;
 pub mod span;
-pub mod step;
+pub mod form_step;
 pub mod style;
 pub mod text_input;
 pub mod validators;

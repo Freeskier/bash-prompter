@@ -1,20 +1,20 @@
 use crate::input::{Input, NodeId};
 use crate::node::Node;
 
-pub struct Step {
+pub struct FormStep {
     pub prompt: String,
     pub hint: Option<String>,
     pub nodes: Vec<Node>,
 }
 
-pub trait StepExt {
+pub trait FormStepExt {
     fn find_input(&self, id: &str) -> Option<&dyn Input>;
     fn find_input_mut(&mut self, id: &str) -> Option<&mut dyn Input>;
     fn validate_all(&self) -> Vec<(NodeId, String)>;
     fn values(&self) -> Vec<(NodeId, String)>;
 }
 
-impl StepExt for Step {
+impl FormStepExt for FormStep {
     fn find_input(&self, id: &str) -> Option<&dyn Input> {
         self.nodes
             .iter()

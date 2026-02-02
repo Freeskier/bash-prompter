@@ -146,6 +146,12 @@ impl Terminal {
 
     pub fn render_line(&mut self, line: &Line) -> io::Result<()> {
         for span in line.spans() {
+            let has_style = span.style().color().is_some()
+                || span.style().background().is_some()
+                || span.style().bold()
+                || span.style().italic()
+                || span.style().underline();
+
             if let Some(fg) = span.style().color() {
                 write!(self.stdout, "{}", SetForegroundColor(map_color(fg)))?;
             }
@@ -165,12 +171,8 @@ impl Terminal {
 
             write!(self.stdout, "{}", span.text())?;
 
-            if span.style().color().is_some()
-                || span.style().background().is_some()
-                || span.style().bold()
-                || span.style().italic()
-                || span.style().underline()
-            {
+            if has_style {
+                write!(self.stdout, "{}", SetAttribute(Attribute::Reset))?;
                 write!(self.stdout, "{}", ResetColor)?;
             }
         }

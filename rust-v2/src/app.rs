@@ -1,11 +1,11 @@
-use crate::date_input::DateInput;
+use crate::date_input::DateTimeInput;
 use crate::event::Action;
 use crate::event_emitter::{AppEvent, EventEmitter};
 use crate::input_manager::InputManager;
 use crate::node::Node;
 use crate::renderer::Renderer;
 use crate::terminal::Terminal;
-use crate::step::{Step, StepExt};
+use crate::form_step::{FormStep, FormStepExt};
 use crate::text_input::TextInput;
 use crate::theme::Theme;
 use crate::validators;
@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 const ERROR_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub struct App {
-    pub step: Step,
+    pub step: FormStep,
     input_indices: Vec<usize>,
     focused_pos: Option<usize>,
     pub renderer: Renderer,
@@ -57,12 +57,17 @@ impl App {
         app
     }
 
-    pub fn tick(&mut self) {
-        let due_events = self.event_emitter.drain_due(Instant::now());
-        for event in due_events {
-            self.handle_event(&event);
-            self.event_emitter.emit(&event);
+    pub fn tick(&mut self) -> bool {
+        let mut processed_any = false;
+        loop {
+            let now = Instant::now();
+            let Some(event) = self.event_emitter.next_ready(now) else {
+                break;
+            };
+            self.dispatch_event(event);
+            processed_any = true;
         }
+        processed_any
     }
 
     pub fn render(&mut self, terminal: &mut Terminal) -> io::Result<()> {
@@ -70,12 +75,31 @@ impl App {
             .render(&self.step, &self.view_state, &self.theme, terminal)
     }
 
+    pub fn request_render(&mut self) {
+        self.event_emitter.emit(AppEvent::Rerender);
+    }
+
     pub fn handle_key(&mut self, key_event: KeyEvent) {
-        if let Some(action) = self.input_manager.handle_key(&key_event) {
-            self.event_emitter.emit(&AppEvent::Action(action));
-            self.handle_action(action);
-        } else {
-            self.handle_input_key(key_event);
+        self.event_emitter.emit(AppEvent::Key(key_event));
+    }
+
+    fn dispatch_event(&mut self, event: AppEvent) {
+        match event {
+            AppEvent::Key(key_event) => {
+                if let Some(action) = self.input_manager.handle_key(&key_event) {
+                    self.event_emitter.emit(AppEvent::Action(action));
+                } else {
+                    self.event_emitter.emit(AppEvent::InputKey(key_event));
+                }
+            }
+            AppEvent::InputKey(key_event) => self.handle_input_key(key_event),
+            AppEvent::Action(action) => self.handle_action(action),
+            AppEvent::ClearErrorMessage { id } => self.handle_clear_error_message(&id),
+            AppEvent::InputChanged { .. }
+            | AppEvent::FocusChanged { .. }
+            | AppEvent::ValidationFailed { .. }
+            | AppEvent::Submitted
+            | AppEvent::Rerender => {}
         }
     }
 
@@ -103,7 +127,8 @@ impl App {
                         AppEvent::ClearErrorMessage { id: id.clone() },
                         ERROR_TIMEOUT,
                     );
-                    self.event_emitter.emit(&AppEvent::ValidationFailed { id, error: err });
+                    self.event_emitter
+                        .emit(AppEvent::ValidationFailed { id, error: err });
                     return;
                 }
 
@@ -117,14 +142,14 @@ impl App {
                 } else {
                     let errors = self.step.validate_all();
                     if errors.is_empty() {
-                        self.event_emitter.emit(&AppEvent::Submitted);
+                        self.event_emitter.emit(AppEvent::Submitted);
                         self.should_exit = true;
                         return;
                     }
 
                     self.apply_validation_errors(&errors);
                     for (id, error) in &errors {
-                        self.event_emitter.emit(&AppEvent::ValidationFailed {
+                        self.event_emitter.emit(AppEvent::ValidationFailed {
                             id: id.clone(),
                             error: error.clone(),
                         });
@@ -151,7 +176,7 @@ impl App {
                 }
                 let after = input.value();
                 if before != after {
-                    self.event_emitter.emit(&AppEvent::InputChanged {
+                    self.event_emitter.emit(AppEvent::InputChanged {
                         id: input.id().clone(),
                         value: after,
                     });
@@ -166,13 +191,16 @@ impl App {
         if let Some(current_pos) = self.focused_pos {
             if let Some(Node::Input(input)) = self.step.nodes.get_mut(self.input_indices[current_pos]) {
                 let before = input.value();
-                input.handle_key(key_event.code, key_event.modifiers);
+                let result = input.handle_key(key_event.code, key_event.modifiers);
                 let after = input.value();
                 if before != after {
-                    self.event_emitter.emit(&AppEvent::InputChanged {
+                    self.event_emitter.emit(AppEvent::InputChanged {
                         id: input.id().clone(),
                         value: after,
                     });
+                }
+                if matches!(result, crate::input::KeyResult::Submit) {
+                    self.event_emitter.emit(AppEvent::Action(Action::Submit));
                 }
                 self.clear_error_message();
                 self.validate_active_input();
@@ -180,16 +208,11 @@ impl App {
         }
     }
 
-    fn handle_event(&mut self, event: &AppEvent) {
-        match event {
-            AppEvent::ClearErrorMessage { id } => {
-                if let Some(pos) = self.find_input_pos_by_id(id) {
-                    if let Some(Node::Input(input)) = self.step.nodes.get_mut(self.input_indices[pos]) {
-                        self.view_state.clear_error_display(input.id());
-                    }
-                }
+    fn handle_clear_error_message(&mut self, id: &str) {
+        if let Some(pos) = self.find_input_pos_by_id(id) {
+            if let Some(Node::Input(input)) = self.step.nodes.get_mut(self.input_indices[pos]) {
+                self.view_state.clear_error_display(input.id());
             }
-            _ => {}
         }
     }
 
@@ -224,7 +247,8 @@ impl App {
 
         self.focused_pos = new_pos;
         if from_id != to_id {
-            self.event_emitter.emit(&AppEvent::FocusChanged { from: from_id, to: to_id });
+            self.event_emitter
+                .emit(AppEvent::FocusChanged { from: from_id, to: to_id });
         }
     }
 
@@ -240,7 +264,7 @@ impl App {
                         let id = input.id().clone();
                         input.set_error(Some(err.clone()));
                         self.view_state.clear_error_display(&id);
-                        self.event_emitter.emit(&AppEvent::ValidationFailed { id, error: err });
+                        self.event_emitter.emit(AppEvent::ValidationFailed { id, error: err });
                     }
                 }
             }
@@ -297,31 +321,28 @@ impl App {
     }
 }
 
-fn build_step() -> Step {
-    Step {
+fn build_step() -> FormStep {
+    FormStep {
         prompt: "Please fill the form:".to_string(),
         hint: Some("Press Tab/Shift+Tab to navigate, Enter to submit, Esc to exit".to_string()),
         nodes: vec![
             Node::input(
                 TextInput::new("username", "Username")
-                    .with_min_width(20)
                     .with_validator(validators::required())
                     .with_validator(validators::min_length(3)),
             ),
             Node::input(
                 TextInput::new("email", "Email")
-                    .with_min_width(30)
                     .with_validator(validators::required())
                     .with_validator(validators::email()),
             ),
             Node::input(
                 TextInput::new("password", "Password")
-                    .with_min_width(20)
                     .with_validator(validators::required())
                     .with_validator(validators::min_length(8)),
             ),
-            Node::input(DateInput::new("birthdate", "Birth Date", "DD/MM/YYYY").with_min_width(15)),
-            Node::input(DateInput::new("meeting_time", "Meeting Time", "HH:mm").with_min_width(10)),
+            Node::input(DateTimeInput::new("birthdate", "Birth Date", "DD/MM/YYYY")),
+            Node::input(DateTimeInput::new("meeting_time", "Meeting Time", "HH:mm")),
         ],
     }
 }

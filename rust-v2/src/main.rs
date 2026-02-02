@@ -28,10 +28,9 @@ fn run() -> io::Result<()> {
 fn event_loop(terminal: &mut Terminal) -> io::Result<()> {
     let mut app = App::new();
 
-    loop {
-        app.tick();
-        app.render(terminal)?;
+    let mut render_requested = true;
 
+    loop {
         if terminal.poll(Duration::from_millis(100))? {
             match terminal.read_event()? {
                 TerminalEvent::Key(key_event) => {
@@ -40,12 +39,28 @@ fn event_loop(terminal: &mut Terminal) -> io::Result<()> {
                     }
 
                     app.handle_key(key_event);
+                    render_requested = true;
                     if app.should_exit {
                         break;
                     }
                 }
-                TerminalEvent::Resize { .. } => {}
+                TerminalEvent::Resize { .. } => {
+                    render_requested = true;
+                }
             }
+        }
+
+        if app.tick() {
+            render_requested = true;
+        }
+
+        if app.should_exit {
+            break;
+        }
+
+        if render_requested {
+            app.render(terminal)?;
+            render_requested = false;
         }
     }
 

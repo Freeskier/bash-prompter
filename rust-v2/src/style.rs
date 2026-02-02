@@ -11,9 +11,7 @@ pub enum Color {
     White,
 }
 
-pub enum Test {
-	One = crossterm::terminal::Clear
-}
+
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Style {

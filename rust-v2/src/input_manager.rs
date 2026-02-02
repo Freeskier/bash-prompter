@@ -49,9 +49,6 @@ impl InputManager {
         // NOTE: Strzałki NIE są bindowane globalnie - obsługuje je każdy input lokalnie
         // To pozwala IpInput używać Up/Down do zmiany wartości, TextInput do nawigacji etc.
 
-        // Actions
-        self.bind(KeyBinding::key(KeyCode::Enter), Action::Submit);
-
         // Input navigation
         self.bind(KeyBinding::key(KeyCode::Tab), Action::NextInput);
         self.bind(

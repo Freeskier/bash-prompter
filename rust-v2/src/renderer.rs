@@ -1,5 +1,6 @@
 use crate::layout::Layout;
-use crate::step::Step;
+use crate::node::Node;
+use crate::form_step::FormStep;
 use crate::terminal::Terminal;
 use crate::theme::Theme;
 use crate::view_state::{ErrorDisplay, ViewState};
@@ -26,7 +27,7 @@ impl Renderer {
 
     pub fn render(
         &mut self,
-        step: &Step,
+        step: &FormStep,
         view_state: &ViewState,
         theme: &Theme,
         terminal: &mut Terminal,
@@ -138,53 +139,84 @@ impl Renderer {
         Ok(())
     }
 
-    fn build_render_lines(&self, step: &Step, view_state: &ViewState, theme: &Theme) -> Vec<RenderLine> {
+    fn build_render_lines(&self, step: &FormStep, view_state: &ViewState, theme: &Theme) -> Vec<RenderLine> {
         let mut lines = Vec::new();
 
-        let prompt_style = theme.prompt.clone();
-        let hint_style = theme.hint.clone();
+        let inline_prompt_input = self.inline_prompt_input(step);
 
-        let input_nodes: Vec<&crate::node::Node> = step
-            .nodes
-            .iter()
-            .filter(|n| matches!(n, crate::node::Node::Input(_)))
-            .collect();
-
-        let inline_prompt_input = input_nodes.len() == 1 && step.nodes.len() == 1;
-
-        if !step.prompt.is_empty() {
-            if inline_prompt_input {
-                if let Some(node) = input_nodes.first() {
-                    let inline_error = match node.as_input() {
-                        Some(input) => matches!(
-                            view_state.error_display(input.id()),
-                            ErrorDisplay::InlineMessage
-                        ),
-                        None => false,
-                    };
-                    let mut spans = vec![
-                        crate::span::Span::new(step.prompt.clone()).with_style(prompt_style),
-                        crate::span::Span::new(" "),
-                    ];
-                    spans.extend(node.render_field(inline_error, theme));
-                    let prompt_width = step.prompt.width();
-                    let cursor_offset = node
-                        .cursor_offset_in_field()
-                        .map(|offset| offset + prompt_width + 1);
-                    lines.push(RenderLine { spans, cursor_offset });
-                }
-            } else {
-                lines.push(RenderLine {
-                    spans: vec![
-                        crate::span::Span::new(step.prompt.clone()).with_style(prompt_style),
-                    ],
-                    cursor_offset: None,
-                });
-            }
+        if let Some(line) = self.render_prompt_line(step, inline_prompt_input, view_state, theme) {
+            lines.push(line);
         }
 
-        if !(inline_prompt_input && !step.prompt.is_empty()) {
-            for node in &step.nodes {
+        if !(inline_prompt_input.is_some() && !step.prompt.is_empty()) {
+            lines.extend(self.render_nodes(step, view_state, theme));
+        }
+
+        if let Some(line) = self.render_hint_line(step, theme) {
+            lines.push(line);
+        }
+
+        lines
+    }
+
+    fn inline_prompt_input<'a>(&self, step: &'a FormStep) -> Option<&'a Node> {
+        if step.nodes.len() == 1 {
+            if let Some(node) = step.nodes.first() {
+                if matches!(node, crate::node::Node::Input(_)) {
+                    return Some(node);
+                }
+            }
+        }
+        None
+    }
+
+    fn render_prompt_line(
+        &self,
+        step: &FormStep,
+        inline_prompt_input: Option<&crate::node::Node>,
+        view_state: &ViewState,
+        theme: &Theme,
+    ) -> Option<RenderLine> {
+        if step.prompt.is_empty() {
+            return None;
+        }
+
+        let prompt_style = theme.prompt.clone();
+        if let Some(node) = inline_prompt_input {
+            let inline_error = match node.as_input() {
+                Some(input) => matches!(
+                    view_state.error_display(input.id()),
+                    ErrorDisplay::InlineMessage
+                ),
+                None => false,
+            };
+            let mut spans = vec![
+                crate::span::Span::new(step.prompt.clone()).with_style(prompt_style),
+                crate::span::Span::new(" "),
+            ];
+            spans.extend(node.render_field(inline_error, theme));
+            let prompt_width = step.prompt.width();
+            let cursor_offset = node
+                .cursor_offset_in_field()
+                .map(|offset| offset + prompt_width + 1);
+            Some(RenderLine { spans, cursor_offset })
+        } else {
+            Some(RenderLine {
+                spans: vec![crate::span::Span::new(step.prompt.clone()).with_style(prompt_style)],
+                cursor_offset: None,
+            })
+        }
+    }
+
+    fn render_nodes(
+        &self,
+        step: &FormStep,
+        view_state: &ViewState,
+        theme: &Theme,
+    ) -> Vec<RenderLine> {
+        step.nodes
+            .iter()
+            .map(|node| {
                 let inline_error = match node.as_input() {
                     Some(input) => matches!(
                         view_state.error_display(input.id()),
@@ -194,19 +226,19 @@ impl Renderer {
                 };
                 let spans = node.render(inline_error, theme);
                 let cursor_offset = node.cursor_offset();
-                lines.push(RenderLine { spans, cursor_offset });
-            }
-        }
+                RenderLine { spans, cursor_offset }
+            })
+            .collect()
+    }
 
-        if let Some(hint) = &step.hint {
-            if !hint.is_empty() {
-                lines.push(RenderLine {
-                    spans: vec![crate::span::Span::new(hint.clone()).with_style(hint_style)],
-                    cursor_offset: None,
-                });
-            }
+    fn render_hint_line(&self, step: &FormStep, theme: &Theme) -> Option<RenderLine> {
+        let hint = step.hint.as_ref()?;
+        if hint.is_empty() {
+            return None;
         }
-
-        lines
+        Some(RenderLine {
+            spans: vec![crate::span::Span::new(hint.clone()).with_style(theme.hint.clone())],
+            cursor_offset: None,
+        })
     }
 }
