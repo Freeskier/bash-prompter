@@ -1,8 +1,7 @@
-use crossterm::event::{self, Event, KeyEventKind, poll};
-use crossterm::{cursor, execute, terminal};
 use rustical::app::App;
-use rustical::step::StepExt;
-use std::io::{self, stdout};
+use rustical::terminal::Terminal;
+use rustical::terminal_event::TerminalEvent;
+use std::io;
 use std::time::Duration;
 
 fn main() {
@@ -12,46 +11,47 @@ fn main() {
 }
 
 fn run() -> io::Result<()> {
-    let mut stdout = stdout();
+    let mut terminal = Terminal::new()?;
+    terminal.enter_raw_mode()?;
+    terminal.set_line_wrap(false)?;
+    terminal.hide_cursor()?;
 
-    terminal::enable_raw_mode()?;
-    execute!(stdout, terminal::DisableLineWrap, cursor::Hide)?;
+    let result = event_loop(&mut terminal);
 
-    let result = event_loop(&mut stdout);
-
-    execute!(stdout, cursor::Show, terminal::EnableLineWrap)?;
-    terminal::disable_raw_mode()?;
+    terminal.show_cursor()?;
+    terminal.set_line_wrap(true)?;
+    terminal.exit_raw_mode()?;
 
     result
 }
 
-fn event_loop(stdout: &mut io::Stdout) -> io::Result<()> {
+fn event_loop(terminal: &mut Terminal) -> io::Result<()> {
     let mut app = App::new();
 
     loop {
         app.tick();
-        app.render(stdout)?;
+        app.render(terminal)?;
 
-        if poll(Duration::from_millis(100))? {
-            if let Event::Key(key_event) = event::read()? {
-                if key_event.kind != KeyEventKind::Press {
-                    continue;
-                }
+        if terminal.poll(Duration::from_millis(100))? {
+            match terminal.read_event()? {
+                TerminalEvent::Key(key_event) => {
+                    if key_event.kind != crossterm::event::KeyEventKind::Press {
+                        continue;
+                    }
 
-                app.handle_key(key_event);
-                if app.should_exit {
-                    break;
+                    app.handle_key(key_event);
+                    if app.should_exit {
+                        break;
+                    }
                 }
+                TerminalEvent::Resize { .. } => {}
             }
         }
     }
 
-    app.renderer.move_to_end(stdout)?;
-    execute!(stdout, terminal::Clear(terminal::ClearType::FromCursorDown))?;
-    println!("\nSubmitted values:");
-    for (id, value) in app.step.values() {
-        println!("  {}: {}", id, value);
-    }
+    app.renderer.move_to_end(terminal)?;
+    terminal.clear_from_cursor_down()?;
+
 
     Ok(())
 }

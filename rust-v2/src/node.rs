@@ -1,7 +1,6 @@
 use crate::input::Input;
 use crate::span::Span;
-use crate::style::Style;
-use crossterm::style::Color;
+use crate::theme::Theme;
 use unicode_width::UnicodeWidthStr;
 
 pub enum Node {
@@ -32,14 +31,12 @@ impl Node {
         }
     }
 
-    pub fn render(&self, inline_error_message: bool) -> Vec<Span> {
+    pub fn render(&self, inline_error_message: bool, theme: &Theme) -> Vec<Span> {
         match self {
             Node::Text(text) => vec![Span::new(text.clone())],
             Node::Input(input) => {
                 let mut spans = vec![Span::new(input.label()), Span::new(": ")];
-                let error_style = Style::new()
-                    .with_fg(Color::Red)
-                    .with_attribute(crossterm::style::Attribute::Bold);
+                let error_style = theme.error.clone();
 
                 if input.is_focused() {
                     spans.push(Span::new("["));
@@ -101,14 +98,12 @@ impl Node {
         }
     }
 
-    pub fn render_field(&self, inline_error_message: bool) -> Vec<Span> {
+    pub fn render_field(&self, inline_error_message: bool, theme: &Theme) -> Vec<Span> {
         match self {
             Node::Text(text) => vec![Span::new(text.clone())],
             Node::Input(input) => {
                 let mut spans = Vec::new();
-                let error_style = Style::new()
-                    .with_fg(Color::Red)
-                    .with_attribute(crossterm::style::Attribute::Bold);
+                let error_style = theme.error.clone();
 
                 spans.push(Span::new("["));
                 let content_spans = if inline_error_message {

@@ -4,8 +4,10 @@ use crate::event_emitter::{AppEvent, EventEmitter};
 use crate::input_manager::InputManager;
 use crate::node::Node;
 use crate::renderer::Renderer;
+use crate::terminal::Terminal;
 use crate::step::{Step, StepExt};
 use crate::text_input::TextInput;
+use crate::theme::Theme;
 use crate::validators;
 use crate::view_state::{ErrorDisplay, ViewState};
 use crossterm::event::KeyEvent;
@@ -22,6 +24,7 @@ pub struct App {
     input_manager: InputManager,
     event_emitter: EventEmitter,
     view_state: ViewState,
+    theme: Theme,
     pub should_exit: bool,
 }
 
@@ -43,6 +46,7 @@ impl App {
             input_manager: InputManager::new(),
             event_emitter: EventEmitter::new(),
             view_state: ViewState::new(),
+            theme: Theme::default_theme(),
             should_exit: false,
         };
 
@@ -61,8 +65,9 @@ impl App {
         }
     }
 
-    pub fn render(&mut self, out: &mut io::Stdout) -> io::Result<()> {
-        self.renderer.render(&self.step, &self.view_state, out)
+    pub fn render(&mut self, terminal: &mut Terminal) -> io::Result<()> {
+        self.renderer
+            .render(&self.step, &self.view_state, &self.theme, terminal)
     }
 
     pub fn handle_key(&mut self, key_event: KeyEvent) {

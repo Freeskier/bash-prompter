@@ -1,6 +1,4 @@
 use crate::span::Span;
-use crossterm::style::{ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor};
-use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Line {
@@ -10,6 +8,10 @@ pub struct Line {
 impl Line {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn spans(&self) -> &[Span] {
+        &self.spans
     }
 
     pub fn push(&mut self, span: Span) {
@@ -24,37 +26,6 @@ impl Line {
 
     pub fn width(&self) -> usize {
         self.spans.iter().map(|s| s.width()).sum()
-    }
-}
-
-impl fmt::Display for Line {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for span in &self.spans {
-            // Zastosuj style jeśli są
-            if let Some(fg) = span.style().fg() {
-                write!(f, "{}", SetForegroundColor(fg))?;
-            }
-            if let Some(bg) = span.style().bg() {
-                write!(f, "{}", SetBackgroundColor(bg))?;
-            }
-
-            // Zastosuj atrybuty (bold, italic, etc.)
-            for attr in span.style().attributes() {
-                write!(f, "{}", SetAttribute(*attr))?;
-            }
-
-            // Tekst
-            write!(f, "{}", span.text())?;
-
-            // Reset stylu
-            if span.style().fg().is_some()
-                || span.style().bg().is_some()
-                || !span.style().attributes().is_empty()
-            {
-                write!(f, "{}", ResetColor)?;
-            }
-        }
-        Ok(())
     }
 }
 
@@ -98,17 +69,5 @@ impl Frame {
         if self.lines.is_empty() {
             self.lines.push(Line::new());
         }
-    }
-}
-
-impl fmt::Display for Frame {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, line) in self.lines.iter().enumerate() {
-            if i > 0 {
-                writeln!(f)?;
-            }
-            write!(f, "{}", line)?;
-        }
-        Ok(())
     }
 }

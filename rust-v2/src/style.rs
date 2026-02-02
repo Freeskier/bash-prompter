@@ -1,10 +1,27 @@
-use crossterm::style::{Attribute, Color};
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Color {
+    Black,
+    DarkGrey,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    White,
+}
+
+pub enum Test {
+	One = crossterm::terminal::Clear
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Style {
-    fg: Option<Color>,
-    bg: Option<Color>,
-    attributes: Vec<Attribute>,
+    color: Option<Color>,
+    background: Option<Color>,
+    bold: bool,
+    italic: bool,
+    underline: bool,
 }
 
 impl Style {
@@ -12,53 +29,72 @@ impl Style {
         Self::default()
     }
 
-    pub fn fg(&self) -> Option<Color> {
-        self.fg
+    pub fn color(&self) -> Option<Color> {
+        self.color
     }
 
-    pub fn bg(&self) -> Option<Color> {
-        self.bg
+    pub fn background(&self) -> Option<Color> {
+        self.background
     }
 
-    pub fn attributes(&self) -> &[Attribute] {
-        &self.attributes
+    pub fn bold(&self) -> bool {
+        self.bold
     }
 
-    pub fn with_fg(mut self, color: Color) -> Self {
-        self.fg = Some(color);
+    pub fn italic(&self) -> bool {
+        self.italic
+    }
+
+    pub fn underline(&self) -> bool {
+        self.underline
+    }
+
+    pub fn with_color(mut self, color: Color) -> Self {
+        self.color = Some(color);
         self
     }
 
-    pub fn with_bg(mut self, color: Color) -> Self {
-        self.bg = Some(color);
+    pub fn with_background(mut self, color: Color) -> Self {
+        self.background = Some(color);
         self
     }
 
-    pub fn with_colors(mut self, fg: Color, bg: Color) -> Self {
-        self.fg = Some(fg);
-        self.bg = Some(bg);
+    pub fn with_colors(mut self, color: Color, background: Color) -> Self {
+        self.color = Some(color);
+        self.background = Some(background);
         self
     }
 
-    pub fn with_attribute(mut self, attribute: Attribute) -> Self {
-        self.attributes.push(attribute);
+    pub fn with_bold(mut self) -> Self {
+        self.bold = true;
         self
     }
 
-    pub fn with_attributes(mut self, attributes: Vec<Attribute>) -> Self {
-        self.attributes = attributes;
+    pub fn with_italic(mut self) -> Self {
+        self.italic = true;
+        self
+    }
+
+    pub fn with_underline(mut self) -> Self {
+        self.underline = true;
         self
     }
 
     pub fn merge(mut self, other: &Style) -> Self {
-        if other.fg.is_some() {
-            self.fg = other.fg;
+        if other.color.is_some() {
+            self.color = other.color;
         }
-        if other.bg.is_some() {
-            self.bg = other.bg;
+        if other.background.is_some() {
+            self.background = other.background;
         }
-        if !other.attributes.is_empty() {
-            self.attributes.extend_from_slice(&other.attributes);
+        if other.bold {
+            self.bold = true;
+        }
+        if other.italic {
+            self.italic = true;
+        }
+        if other.underline {
+            self.underline = true;
         }
         self
     }

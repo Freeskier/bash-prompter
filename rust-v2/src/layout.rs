@@ -18,7 +18,9 @@ impl Layout {
     }
 
     pub fn compose(&self, nodes: &[Node], width: u16) -> Frame {
-        self.compose_with(nodes, width, |node| node.render(false))
+        self.compose_with(nodes, width, |node| {
+            node.render(false, &crate::theme::Theme::default_theme())
+        })
     }
 
     pub fn compose_with<F>(&self, nodes: &[Node], width: u16, render: F) -> Frame

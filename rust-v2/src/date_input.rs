@@ -1,9 +1,9 @@
 use crate::input::{Input, InputBase, KeyResult, NodeId};
 use crate::span::Span;
 use crate::style::Style;
+use crate::theme;
 use crate::validators::Validator;
 use crossterm::event::{KeyCode, KeyModifiers};
-use crossterm::style::Color;
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -379,13 +379,13 @@ impl Input for DateInput {
             }
 
             let mut style = if segment.is_empty() {
-                Style::new().with_fg(Color::DarkGrey)
+                theme::placeholder_style()
             } else {
                 Style::default()
             };
 
             if i == self.focused_segment && self.base.focused {
-                style = style.with_attribute(crossterm::style::Attribute::Bold);
+                style = style.merge(&theme::focused_style());
             }
 
             spans.push(Span::new(segment.display_string()).with_style(style));

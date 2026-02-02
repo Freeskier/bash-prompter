@@ -1,9 +1,8 @@
 use crate::layout::Layout;
 use crate::step::Step;
-use crate::style::Style;
+use crate::terminal::Terminal;
+use crate::theme::Theme;
 use crate::view_state::{ErrorDisplay, ViewState};
-use crossterm::{cursor, queue, terminal};
-use crossterm::style::Color;
 use std::io::{self, Write};
 use unicode_width::UnicodeWidthStr;
 
@@ -29,29 +28,31 @@ impl Renderer {
         &mut self,
         step: &Step,
         view_state: &ViewState,
-        out: &mut impl Write,
+        theme: &Theme,
+        terminal: &mut Terminal,
     ) -> io::Result<()> {
-        let (width, _) = terminal::size()?;
-        let render_lines = self.build_render_lines(step, view_state);
+        let _ = terminal.refresh_size()?;
+        let width = terminal.size().width;
+        let render_lines = self.build_render_lines(step, view_state, theme);
         let frame = Layout::new().compose_spans(
             render_lines.iter().map(|line| line.spans.clone()),
             width,
         );
         let lines = frame.lines();
-        let start = self.ensure_start_row(out, lines.len())?;
-        queue!(out, cursor::Hide)?;
-        self.draw_lines(out, start, lines)?;
-        self.clear_extra_lines(out, start, lines.len())?;
+        let start = self.ensure_start_row(terminal, lines.len())?;
+        terminal.queue_hide_cursor()?;
+        self.draw_lines(terminal, start, lines)?;
+        self.clear_extra_lines(terminal, start, lines.len())?;
         self.num_lines = lines.len();
-        out.flush()?;
+        terminal.flush()?;
 
         let cursor_pos = self.find_cursor_position(&render_lines);
         if let Some((col, line_idx)) = cursor_pos {
             let cursor_row = start + line_idx as u16;
-            queue!(out, cursor::MoveTo(col as u16, cursor_row))?;
+            terminal.queue_move_cursor(col as u16, cursor_row)?;
         }
-        queue!(out, cursor::Show)?;
-        out.flush()?;
+        terminal.queue_show_cursor()?;
+        terminal.flush()?;
 
         Ok(())
     }
@@ -71,29 +72,34 @@ impl Renderer {
         None
     }
 
-    pub fn move_to_end(&self, out: &mut impl Write) -> io::Result<()> {
+    pub fn move_to_end(&self, terminal: &mut Terminal) -> io::Result<()> {
         if let Some(start) = self.start_row {
             let end_row = start + self.num_lines as u16;
-            queue!(out, cursor::MoveTo(0, end_row))?;
-            out.flush()?;
+            terminal.queue_move_cursor(0, end_row)?;
+            terminal.flush()?;
         }
         Ok(())
     }
 
-    fn ensure_start_row(&mut self, out: &mut impl Write, line_count: usize) -> io::Result<u16> {
+    fn ensure_start_row(&mut self, terminal: &mut Terminal, line_count: usize) -> io::Result<u16> {
         if let Some(start) = self.start_row {
             return Ok(start);
         }
 
-        let (_, row) = cursor::position()?;
-        queue!(out, cursor::MoveTo(0, row))?;
-        for _ in 0..line_count {
-            writeln!(out)?;
+        terminal.refresh_cursor_position()?;
+        let pos = terminal.cursor_position();
+        terminal.queue_move_cursor(0, pos.y)?;
+        {
+            let out = terminal.writer_mut();
+            for _ in 0..line_count {
+                writeln!(out)?;
+            }
         }
-        out.flush()?;
+        terminal.flush()?;
 
-        let (_, end_row) = cursor::position()?;
-        let start = end_row.saturating_sub(line_count as u16);
+        terminal.refresh_cursor_position()?;
+        let pos = terminal.cursor_position();
+        let start = pos.y.saturating_sub(line_count as u16);
         self.start_row = Some(start);
         self.num_lines = line_count;
         Ok(start)
@@ -101,22 +107,22 @@ impl Renderer {
 
     fn draw_lines(
         &self,
-        out: &mut impl Write,
+        terminal: &mut Terminal,
         start: u16,
         lines: &[crate::frame::Line],
     ) -> io::Result<()> {
         for (idx, line) in lines.iter().enumerate() {
             let line_row = start + idx as u16;
-            queue!(out, cursor::MoveTo(0, line_row))?;
-            queue!(out, terminal::Clear(terminal::ClearType::CurrentLine))?;
-            write!(out, "{}", line)?;
+            terminal.queue_move_cursor(0, line_row)?;
+            terminal.queue_clear_line()?;
+            terminal.render_line(line)?;
         }
         Ok(())
     }
 
     fn clear_extra_lines(
         &self,
-        out: &mut impl Write,
+        terminal: &mut Terminal,
         start: u16,
         current_len: usize,
     ) -> io::Result<()> {
@@ -126,17 +132,17 @@ impl Renderer {
 
         for idx in current_len..self.num_lines {
             let line_row = start + idx as u16;
-            queue!(out, cursor::MoveTo(0, line_row))?;
-            queue!(out, terminal::Clear(terminal::ClearType::CurrentLine))?;
+            terminal.queue_move_cursor(0, line_row)?;
+            terminal.queue_clear_line()?;
         }
         Ok(())
     }
 
-    fn build_render_lines(&self, step: &Step, view_state: &ViewState) -> Vec<RenderLine> {
+    fn build_render_lines(&self, step: &Step, view_state: &ViewState, theme: &Theme) -> Vec<RenderLine> {
         let mut lines = Vec::new();
 
-        let prompt_style = Style::new().with_attribute(crossterm::style::Attribute::Bold);
-        let hint_style = Style::new().with_fg(Color::DarkGrey);
+        let prompt_style = theme.prompt.clone();
+        let hint_style = theme.hint.clone();
 
         let input_nodes: Vec<&crate::node::Node> = step
             .nodes
@@ -160,7 +166,7 @@ impl Renderer {
                         crate::span::Span::new(step.prompt.clone()).with_style(prompt_style),
                         crate::span::Span::new(" "),
                     ];
-                    spans.extend(node.render_field(inline_error));
+                    spans.extend(node.render_field(inline_error, theme));
                     let prompt_width = step.prompt.width();
                     let cursor_offset = node
                         .cursor_offset_in_field()
@@ -186,7 +192,7 @@ impl Renderer {
                     ),
                     None => false,
                 };
-                let spans = node.render(inline_error);
+                let spans = node.render(inline_error, theme);
                 let cursor_offset = node.cursor_offset();
                 lines.push(RenderLine { spans, cursor_offset });
             }
